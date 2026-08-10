@@ -38,6 +38,16 @@ class View:
         kind = "Batting" if self.role == BATTER else "Pitching"
         return f"{kind} Ratings" + (" (Potential)" if self.mode == POTENTIAL else "")
 
+    @property
+    def calculator_type(self) -> str:
+        """What the site calls this, which is also its download filename.
+
+        Not the same word as `role`: the site says "batting"/"pitching" and
+        names its export <type>-projections.csv, so telling the user to look
+        for "batter-projections.csv" sends them after a file that never exists.
+        """
+        return "batting" if self.role == BATTER else "pitching"
+
 
 VIEWS: tuple[View, ...] = (
     View(

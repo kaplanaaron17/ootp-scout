@@ -53,7 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
     flag.add_argument("report", help="the same OOTP report you pasted in; the "
                                      "word 'latest' resolves to the most recent "
                                      "report OOTP wrote")
-    flag.add_argument("projections", help="*-projections.csv from the calculator")
+    flag.add_argument("projections",
+                      help="the CSV downloaded from the calculator; the word "
+                           "'latest' finds the newest *-projections.csv in your "
+                           "Downloads folder")
     flag.add_argument("--out", help="write the flagged players to this CSV")
     flag.add_argument("--limit", type=int, default=25,
                       help="how many players to report (default: 25)")
@@ -148,9 +151,9 @@ def command_prepare(args: argparse.Namespace) -> int:
               "clipboard - then click SUBMIT")
     else:
         print(f"  3. Paste the whole contents of {destination}, click SUBMIT")
-    print("  4. Click DOWNLOAD CSV")
-    print(f"  5. python -m ootp_scout flag \"{report}\" "
-          f"{view.role}-projections.csv")
+    print(f"  4. Click DOWNLOAD CSV (it saves as "
+          f"{view.calculator_type}-projections.csv)")
+    print("  5. python -m ootp_scout flag latest latest --out targets.csv")
     return 0
 
 
@@ -162,7 +165,11 @@ def command_flag(args: argparse.Namespace) -> int:
         print(f"error reading {args.report}: {error}", file=sys.stderr)
         return 1
     try:
-        projected, projection_problems = projections.load_projections(args.projections)
+        projections_path = args.projections
+        if projections_path.lower() == "latest":
+            projections_path = reports.find_latest_projections()
+            print(f"Using projections: {projections_path}")
+        projected, projection_problems = projections.load_projections(projections_path)
     except (OSError, ValueError) as error:
         print(f"error reading {args.projections}: {error}", file=sys.stderr)
         return 1

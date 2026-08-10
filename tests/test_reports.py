@@ -82,6 +82,52 @@ class FindReportsTest(unittest.TestCase):
         self.assertEqual(reports.find_reports(["Z:\\definitely\\not\\here"]), [])
 
 
+class FindLatestProjectionsTest(unittest.TestCase):
+    def _write(self, folder, name, age_seconds=0):
+        path = os.path.join(folder, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("Name,WAR\nAl,3.0\n")
+        if age_seconds:
+            stamp = time.time() - age_seconds
+            os.utime(path, (stamp, stamp))
+        return path
+
+    def test_finds_the_sites_actual_filename(self):
+        """The site exports batting-/pitching-, not batter-/pitcher-."""
+        with tempfile.TemporaryDirectory() as folder:
+            expected = self._write(folder, "batting-projections.csv")
+            self.assertEqual(reports.find_latest_projections([folder]), expected)
+
+    def test_finds_pitching_too(self):
+        with tempfile.TemporaryDirectory() as folder:
+            expected = self._write(folder, "pitching-projections.csv")
+            self.assertEqual(reports.find_latest_projections([folder]), expected)
+
+    def test_browser_duplicate_suffix_is_matched(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self._write(folder, "batting-projections.csv", age_seconds=600)
+            newest = self._write(folder, "batting-projections (2).csv")
+            self.assertEqual(reports.find_latest_projections([folder]), newest)
+
+    def test_newest_wins_across_types(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self._write(folder, "batting-projections.csv", age_seconds=3600)
+            newest = self._write(folder, "pitching-projections.csv")
+            self.assertEqual(reports.find_latest_projections([folder]), newest)
+
+    def test_unrelated_csvs_are_ignored(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self._write(folder, "statsplus.csv")
+            with self.assertRaises(FileNotFoundError):
+                reports.find_latest_projections([folder])
+
+    def test_nothing_found_raises_with_instructions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(FileNotFoundError) as caught:
+                reports.find_latest_projections([folder])
+        self.assertIn("Download CSV", str(caught.exception))
+
+
 class CandidateRootsTest(unittest.TestCase):
     def test_only_returns_directories_that_exist(self):
         for root in reports.candidate_roots():

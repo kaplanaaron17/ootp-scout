@@ -105,7 +105,7 @@ class PrepareCommandTest(unittest.TestCase):
             with open(destination, encoding="utf-8") as handle:
                 lines = handle.read().splitlines()
         self.assertIn("Batting Ratings", out)
-        self.assertIn("batter-projections", out)
+        self.assertIn("batting-projections.csv", out)
         self.assertEqual(len(lines), 42)  # header plus 41 players
         self.assertTrue(lines[0].startswith("POS\t#\tName"))
 

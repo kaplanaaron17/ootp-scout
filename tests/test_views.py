@@ -67,6 +67,17 @@ class IdentifyViewTest(unittest.TestCase):
         self.assertNotIn("GAP", pitcher.headers)
 
 
+class CalculatorTypeTest(unittest.TestCase):
+    def test_matches_the_sites_download_filename(self):
+        """The site says batting/pitching; 'batter'/'pitcher' names no file."""
+        cases = [(BATTER_CURRENT, "batting"), (BATTER_POTENTIAL, "batting"),
+                 (PITCHER_CURRENT, "pitching"), (PITCHER_POTENTIAL, "pitching")]
+        for headers, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(views.identify_view(headers).calculator_type,
+                                 expected)
+
+
 class ParseRowsTest(unittest.TestCase):
     def test_parses_grade_from_the_view_specific_column(self):
         view = views.identify_view(BATTER_POTENTIAL)

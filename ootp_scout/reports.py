@@ -68,6 +68,40 @@ def find_reports(roots: list[str] | None = None) -> list[FoundReport]:
     return reports
 
 
+def download_folders() -> list[str]:
+    home = os.path.expanduser("~")
+    folders = [os.path.join(home, "Downloads"),
+               os.path.join(home, "OneDrive", "Downloads")]
+    return [f for f in folders if os.path.isdir(f)]
+
+
+def find_latest_projections(folders: list[str] | None = None) -> str:
+    """The newest *-projections.csv the calculator has downloaded.
+
+    The site names its export after its own word for the player type -
+    batting-projections.csv or pitching-projections.csv - and browsers append
+    " (1)", " (2)" and so on when you download it again. Matching the pattern
+    beats making the user retype whichever variant they ended up with.
+    """
+    candidates: list[tuple[float, str]] = []
+    for folder in (folders if folders is not None else download_folders()):
+        for pattern in ("*-projections*.csv", "*projections*.csv"):
+            for path in glob(os.path.join(folder, pattern)):
+                try:
+                    candidates.append((os.path.getmtime(path), path))
+                except OSError:
+                    continue
+            if candidates:
+                break
+    if not candidates:
+        searched = ", ".join(folders if folders is not None else download_folders())
+        raise FileNotFoundError(
+            "no *-projections.csv found in " + (searched or "any Downloads "
+            "folder") + ". Download it from ootpcalculator.com with the "
+            "'Download CSV' button, or pass the file path directly.")
+    return max(candidates)[1]
+
+
 def find_latest(roots: list[str] | None = None) -> FoundReport:
     reports = find_reports(roots)
     if not reports:
