@@ -73,14 +73,20 @@ The **default draft-pool view will not work** — it exports OVR and POT and no
 underlying ratings, so there is nothing to project from. `prepare` says so and
 names the view you want instead.
 
-### Use the 1-100 scale
+### Rating scales
+
+Pass `--scale` to match whatever OOTP is set to; it defaults to `20 to 80`.
+Whatever you choose here must match the RATINGS SCALE dropdown on the site.
 
 On the 20-80 scale the calculator rejects any rating that is not a multiple of
-5, because OOTP rounds to the nearest grade when it displays that scale. The
-1-100 scale keeps the resolution that 20-80 throws away, and it makes the
-residual ranking finer. `prepare` validates this before you paste and names the
-player and column at fault, rather than letting the site reject the whole batch
-with a generic message.
+5. OOTP's own 20-80 display works in fives, so a real export should pass, but
+`prepare` checks before you paste and names the player and column at fault
+rather than letting the site reject the whole batch with a generic message.
+
+If you have a choice, 1-100 carries more resolution than 20-80 and makes the
+residual ranking finer — a 20-80 pool puts many players on identical grades,
+which flattens the fit. It is a marginal gain, not a reason to change a save
+you are happy with.
 
 ## How the flagging works
 
