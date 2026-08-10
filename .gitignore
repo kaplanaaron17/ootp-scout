@@ -2,4 +2,4 @@
 *.pyc
 /*.tsv
 /*.csv
-/*.paste.tsv
+/*.html

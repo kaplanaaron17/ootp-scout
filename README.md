@@ -19,22 +19,36 @@ Pure standard library. No install, no dependencies.
 The calculator is a website with no API, so there is one manual paste in the
 middle. It is per *pool*, not per player — a few clicks for a whole draft class.
 
+In OOTP: pick your player list, switch to one of the ratings views below, then
+**Report → Write report to disk**. That saves an HTML file (and opens it in your
+browser — you can ignore the browser window). Then:
+
 ```bash
-python -m ootp_scout prepare pool.tsv --scale "20 to 80"
+.\capture.ps1 -Report "path\to\that\report.html"
 ```
 
-That checks the export, tells you which view it found, and writes
-`pool.paste.tsv`. Then:
+This reads OOTP's HTML directly, checks it, and puts the paste block **on your
+clipboard**. Then:
 
 1. Open the [batter](https://ootpcalculator.com/batter-projections) or
    [pitcher](https://ootpcalculator.com/pitcher-projections) projections page
 2. Set **RATINGS SCALE** to match your export, then click **BATCH INPUT**
-3. Paste the whole file, click **SUBMIT**
+3. **Ctrl+V**, click **SUBMIT**
 4. Click **DOWNLOAD CSV**
 
 ```bash
-python -m ootp_scout flag pool.tsv batter-projections.csv --out targets.csv
+python -m ootp_scout flag report.html "$env:USERPROFILE\Downloads\batter-projections.csv" --out targets.csv
 ```
+
+`capture.ps1` with no `-Report` reads the clipboard instead, for when you have
+selected the table in the browser and copied it yourself. Both paths end the
+same way. The Python commands work standalone too:
+
+```bash
+python -m ootp_scout prepare report.html --scale "20 to 80"
+```
+
+HTML, TSV and CSV are all accepted wherever a report is expected.
 
 Output:
 
@@ -55,8 +69,8 @@ Useful flags on `flag`: `--limit`, `--min-z 1.5`, `--degree 2` (fit a curve),
 ## Getting the export out of OOTP
 
 In OOTP, find the players you want, switch to one of these four views, then
-**Report → Write report to disk**, and save the page. The calculator accepts
-exactly these column sets and nothing else:
+**Report → Write report to disk**. The calculator accepts exactly these column
+sets and nothing else:
 
 | View | Grade | Ratings |
 | --- | --- | --- |
