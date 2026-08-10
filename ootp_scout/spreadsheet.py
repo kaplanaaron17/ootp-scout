@@ -20,6 +20,9 @@ COLUMNS = [
     ("Differential", 13), ("z", 8), ("Scouting Accuracy", 18),
 ]
 
+# Added after Projected WAR when the sheet contains pitchers.
+PITCHER_COLUMNS = [("rWAR", 9), ("rWAR - WAR", 13)]
+
 
 class SpreadsheetUnavailable(RuntimeError):
     pass
@@ -52,20 +55,32 @@ def _write_findings_sheet(sheet, findings: list[Finding], grade_label: str,
     header_font = Font(bold=True, color="FFFFFFFF")
     bold = Font(bold=True)
 
-    headers = [name for name, _width in COLUMNS]
+    # rWAR only exists for pitchers, so a batters-only sheet keeps its old
+    # shape and no reader is left wondering why two columns are empty.
+    show_rwar = any(f.subject.rwar is not None for f in findings)
+    columns = list(COLUMNS)
+    if show_rwar:
+        columns[7:7] = PITCHER_COLUMNS
+
+    headers = [name for name, _width in columns]
     headers[5] = grade_label
     sheet.append(headers)
-    for index, (_name, width) in enumerate(COLUMNS, start=1):
+    for index, (_name, width) in enumerate(columns, start=1):
         cell = sheet.cell(row=1, column=index)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
         sheet.column_dimensions[get_column_letter(index)].width = width
 
+    differential_column = headers.index("Differential") + 1
+    numeric_columns = {headers.index(name) + 1 for name in
+                       ("Projected WAR", "Expected WAR", "Differential", "z",
+                        "rWAR", "rWAR - WAR") if name in headers}
+
     for rank, finding in enumerate(findings, start=1):
         subject = finding.subject
         age = subject.meta.get("age", "")
-        sheet.append([
+        values = [
             rank,
             subject.name,
             subject.position,
@@ -73,11 +88,20 @@ def _write_findings_sheet(sheet, findings: list[Finding], grade_label: str,
             finding.group,
             subject.grade,
             round(subject.war, 2),
+        ]
+        if show_rwar:
+            values += [
+                None if subject.rwar is None else round(subject.rwar, 2),
+                None if subject.war_gap is None else round(subject.war_gap, 2),
+            ]
+        values += [
             round(finding.expected_war, 2),
             round(finding.residual, 2),
             round(finding.z_score, 2),
             finding.scouting_accuracy,
-        ])
+        ]
+        sheet.append(values)
+
         row = sheet.max_row
         # Overrated players are ranked by how far *below* the line they sit,
         # so the same thresholds apply to the magnitude of a negative z.
@@ -88,18 +112,18 @@ def _write_findings_sheet(sheet, findings: list[Finding], grade_label: str,
             fill = notable_fill
         else:
             fill = None
-        for column in range(1, len(COLUMNS) + 1):
+        for column in range(1, len(columns) + 1):
             cell = sheet.cell(row=row, column=column)
             if fill is not None:
                 cell.fill = fill
-            if column in (7, 8, 9, 10):
+            if column in numeric_columns:
                 cell.number_format = "0.00"
-            if column == 9 and strength >= strong_z:
+            if column == differential_column and strength >= strong_z:
                 cell.font = bold
 
     sheet.freeze_panes = "A2"
     if findings:
-        sheet.auto_filter.ref = (f"A1:{get_column_letter(len(COLUMNS))}"
+        sheet.auto_filter.ref = (f"A1:{get_column_letter(len(columns))}"
                                  f"{sheet.max_row}")
 
 

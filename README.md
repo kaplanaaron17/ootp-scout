@@ -75,6 +75,31 @@ argued with rather than just trusted. `--highlight-z` moves the green
 threshold. Writing `.xlsx` needs `openpyxl`; a `.csv` name stays
 dependency-free.
 
+## rWAR, for pitchers
+
+The calculator reports one WAR for pitchers, sitting next to FIP — so it is the
+fielding-independent kind, built from strikeouts, walks and home runs. Its
+output also carries **IP** and **R**, which is everything a runs-allowed WAR
+needs, so pitcher runs show an **rWAR** column and the **rWAR − WAR** gap
+beside it.
+
+Where they disagree is the point. A pitcher whose rWAR trails his WAR gave up
+more runs than his peripherals imply — usually his BABIP or home-run rate doing
+the damage rather than his strikeout and walk skills. In the fixture pool, Ace
+Sleeper projects 9.10 WAR but 7.80 rWAR.
+
+Runs-above-replacement needs a replacement baseline, which the calculator does
+not expose. Rather than import a number from a different run environment, the
+baseline is solved so the pool's mean rWAR equals its mean WAR. The two columns
+then sit on one scale by construction and the per-pitcher gap is not
+contaminated by a level shift. **This is pool-relative and is not
+Baseball-Reference's rWAR** — do not quote it as one.
+
+The columns appear only when the projections carry innings, so batter runs are
+unaffected.
+
+## Both ends of the ranking
+
 Both ends of the ranking are reported. **Most underrated** are the players to
 target; **most overrated** are the same fit read downwards — players projecting
 below what their grade implies, which is who to trade away or stop paying up

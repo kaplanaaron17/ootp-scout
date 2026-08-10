@@ -14,15 +14,16 @@ import sys
 
 from datetime import datetime
 
-from . import (clipboard, flagging, projections, reports, spreadsheet,
-               tables, views)
+from . import (clipboard, flagging, pitching, projections, reports,
+               spreadsheet, tables, views)
 
 BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
 
 REPORT_FIELDS = [
     "rank", "name", "position", "age", "group", "grade", "projected_war",
-    "expected_war", "residual", "z_score", "scouting_accuracy",
+    "rwar", "rwar_minus_war", "expected_war", "residual", "z_score",
+    "scouting_accuracy",
 ]
 
 # Below this many matched players there is no pool to fit against.
@@ -207,6 +208,7 @@ def command_flag(args: argparse.Namespace) -> int:
         return 1
 
     index, duplicates = projections.index_by_name(projected)
+    rwar_by_name = pitching.compute_rwar(projected)
 
     subjects: list[flagging.Subject] = []
     unmatched: list[str] = []
@@ -222,7 +224,8 @@ def command_flag(args: argparse.Namespace) -> int:
             continue
         subjects.append(flagging.Subject(
             name=row.name, position=row.position, grade=row.grade,
-            war=projection.war, is_pitcher=row.is_pitcher, meta=row.meta))
+            war=projection.war, is_pitcher=row.is_pitcher, meta=row.meta,
+            rwar=rwar_by_name.get(row.name.strip().lower())))
 
     # A fit needs a pool. Matching a handful of names usually means the report
     # and the projections came from two different exports, and fitting a line
@@ -312,17 +315,29 @@ def command_flag(args: argparse.Namespace) -> int:
 
 
 def _format_table(findings: list[flagging.Finding], grade_label: str) -> str:
+    # rWAR only exists for pitchers, so the columns appear only when some row
+    # actually has one - a batter table stays as narrow as it was.
+    show_rwar = any(f.subject.rwar is not None for f in findings)
     header = (f"{'#':>3}  {'Player':<24} {'Pos':<4} {'Age':>3} {grade_label:>5} "
-              f"{'WAR':>6} {'Exp':>6} {'Diff':>6} {'z':>5}  Scouting")
+              f"{'WAR':>6} ")
+    if show_rwar:
+        header += f"{'rWAR':>6} {'R-W':>6} "
+    header += f"{'Exp':>6} {'Diff':>6} {'z':>5}  Scouting"
+
     lines = [header, "-" * len(header)]
     for rank, finding in enumerate(findings, start=1):
         subject = finding.subject
-        lines.append(
-            f"{rank:>3}  {subject.name[:24]:<24} {subject.position[:4]:<4} "
-            f"{subject.meta.get('age', ''):>3} {subject.grade:>5.0f} "
-            f"{subject.war:>6.2f} {finding.expected_war:>6.2f} "
-            f"{finding.residual:>+6.2f} {finding.z_score:>5.2f}  "
-            f"{finding.scouting_accuracy}")
+        row = (f"{rank:>3}  {subject.name[:24]:<24} {subject.position[:4]:<4} "
+               f"{subject.meta.get('age', ''):>3} {subject.grade:>5.0f} "
+               f"{subject.war:>6.2f} ")
+        if show_rwar:
+            if subject.rwar is None:
+                row += f"{'-':>6} {'-':>6} "
+            else:
+                row += f"{subject.rwar:>6.2f} {subject.war_gap:>+6.2f} "
+        row += (f"{finding.expected_war:>6.2f} {finding.residual:>+6.2f} "
+                f"{finding.z_score:>5.2f}  {finding.scouting_accuracy}")
+        lines.append(row)
     return "\n".join(lines)
 
 
@@ -340,6 +355,9 @@ def _write_csv(path: str, findings: list[flagging.Finding]) -> None:
                 "group": finding.group,
                 "grade": f"{subject.grade:.0f}",
                 "projected_war": f"{subject.war:.2f}",
+                "rwar": "" if subject.rwar is None else f"{subject.rwar:.2f}",
+                "rwar_minus_war": ("" if subject.war_gap is None
+                                   else f"{subject.war_gap:+.2f}"),
                 "expected_war": f"{finding.expected_war:.2f}",
                 "residual": f"{finding.residual:+.2f}",
                 "z_score": f"{finding.z_score:.2f}",

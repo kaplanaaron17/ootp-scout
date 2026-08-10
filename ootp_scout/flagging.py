@@ -47,6 +47,13 @@ class Subject:
     war: float
     is_pitcher: bool = False
     meta: dict[str, str] = field(default_factory=dict)
+    # Runs-allowed WAR, for pitchers whose projection carried IP and R.
+    rwar: float | None = None
+
+    @property
+    def war_gap(self) -> float | None:
+        """rWAR minus WAR. Negative means runs allowed lag the peripherals."""
+        return None if self.rwar is None else self.rwar - self.war
 
     @property
     def normalized_position(self) -> str:

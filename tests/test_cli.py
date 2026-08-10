@@ -21,6 +21,8 @@ from ootp_scout import clipboard, cli
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 REPORT = os.path.join(FIXTURES, "pool_batters.tsv")
 PROJECTIONS = os.path.join(FIXTURES, "batter-projections.csv")
+PITCHER_REPORT = os.path.join(FIXTURES, "pool_pitchers.tsv")
+PITCHER_PROJECTIONS = os.path.join(FIXTURES, "pitching-projections.csv")
 
 
 def run(argv):
@@ -90,6 +92,57 @@ class FlagCommandTest(unittest.TestCase):
                 content = handle.read()
         self.assertIn("scouting_accuracy", content.splitlines()[0])
         self.assertIn("Sleeper Sam", content)
+
+    def test_pitchers_get_rwar_columns(self):
+        _, out, _ = run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS,
+                         "--limit", "3", "--overrated", "0"])
+        self.assertIn("rWAR", out)
+        self.assertIn("R-W", out)
+
+    def test_batters_do_not_get_rwar_columns(self):
+        """Batter output has no IP, so the columns would only ever be empty."""
+        _, out, _ = run(["flag", REPORT, PROJECTIONS, "--limit", "3",
+                         "--overrated", "0"])
+        self.assertNotIn("rWAR", out)
+
+    def test_rwar_reaches_the_spreadsheet(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "arms.xlsx")
+            run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS, "--limit", "5",
+                 "--overrated", "0", "--out", destination])
+            book = openpyxl.load_workbook(destination)
+            try:
+                sheet = book["Targets"]
+                headers = [c.value for c in sheet[1]]
+                self.assertIn("rWAR", headers)
+                self.assertIn("rWAR - WAR", headers)
+                column = headers.index("rWAR") + 1
+                self.assertIsInstance(sheet.cell(row=2, column=column).value,
+                                      (int, float))
+            finally:
+                book.close()
+
+    def test_rwar_reaches_the_csv(self):
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "arms.csv")
+            run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS, "--limit", "3",
+                 "--out", destination])
+            with open(destination, encoding="utf-8") as handle:
+                header, first = handle.read().splitlines()[:2]
+        self.assertIn("rwar", header)
+        self.assertIn("rwar_minus_war", header)
+        self.assertTrue(first.split(",")[7])   # rwar column is populated
+
+    def test_pitcher_pool_runs_end_to_end(self):
+        code, out, _ = run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS,
+                            "--limit", "5"])
+        self.assertEqual(code, 0)
+        self.assertIn("Matched: 31 of 31", out)
+        self.assertIn("Ace Sleeper", out)
 
     def test_overrated_leaderboard_is_printed(self):
         _, out, _ = run(["flag", REPORT, PROJECTIONS, "--limit", "3",
