@@ -94,6 +94,44 @@ class FlagCommandTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Download CSV", err)
 
+    def test_projections_from_a_different_pool_are_refused(self):
+        """Two unrelated exports must not produce a confident-looking ranking."""
+        with tempfile.TemporaryDirectory() as folder:
+            other = os.path.join(folder, "other-projections.csv")
+            with open(PROJECTIONS, encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+            renamed = [lines[0]]
+            for index, line in enumerate(lines[1:]):
+                cells = line.split(",")
+                cells[0] = f"Nobody {index}"
+                renamed.append(",".join(cells))
+            with open(other, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(renamed) + "\n")
+            code, _, err = run(["flag", REPORT, other])
+        self.assertEqual(code, 1)
+        self.assertIn("two different pools", err)
+        self.assertIn("41 players", err)
+
+    def test_a_partial_match_warns_but_still_ranks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            partial = os.path.join(folder, "partial-projections.csv")
+            with open(PROJECTIONS, encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+            keep = [lines[0]]
+            for index, line in enumerate(lines[1:]):
+                cells = line.split(",")
+                if index % 3:                      # drop two thirds of them
+                    cells[0] = f"Nobody {index}"
+                keep.append(",".join(cells))
+            with open(partial, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(keep) + "\n")
+            code, out, err = run(["flag", REPORT, partial, "--limit", "3"])
+        self.assertEqual(code, 0)
+        self.assertIn("WARNING", err)
+        self.assertIn("matched a projection", err)
+        self.assertTrue(any(line.strip().startswith("1 ")
+                            for line in out.splitlines()))
+
 
 class PrepareCommandTest(unittest.TestCase):
     def test_detects_the_view_and_writes_a_paste_block(self):

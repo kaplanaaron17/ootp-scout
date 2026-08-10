@@ -25,6 +25,11 @@ REPORT_FIELDS = [
     "expected_war", "residual", "z_score", "scouting_accuracy",
 ]
 
+# Below this many matched players there is no pool to fit against.
+MIN_MATCHES = 5
+# Below this share of the report matching, say so loudly but still rank.
+LOW_MATCH_RATE = 0.5
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -203,10 +208,25 @@ def command_flag(args: argparse.Namespace) -> int:
             name=row.name, position=row.position, grade=row.grade,
             war=projection.war, is_pitcher=row.is_pitcher, meta=row.meta))
 
-    if not subjects:
-        print("error: no player in the report matched a projection by name. "
-              "Check that both files came from the same pool.", file=sys.stderr)
+    # A fit needs a pool. Matching a handful of names usually means the report
+    # and the projections came from two different exports, and fitting a line
+    # to whatever overlapped would dress up noise as a ranking.
+    if len(subjects) < MIN_MATCHES:
+        print(f"error: only {len(subjects)} of {len(rows)} players in the "
+              f"report matched a projection by name.", file=sys.stderr)
+        print(f"  report:      {len(rows)} players - {report}", file=sys.stderr)
+        print(f"  projections: {len(projected)} players - {projections_path}",
+              file=sys.stderr)
+        print("\nThese look like two different pools. Re-run the calculator "
+              "with the paste block from this report, download that CSV, and "
+              "try again.", file=sys.stderr)
         return 1
+
+    match_rate = len(subjects) / len(rows) if rows else 0.0
+    if match_rate < LOW_MATCH_RATE:
+        print(f"WARNING: only {len(subjects)} of {len(rows)} report players "
+              f"({match_rate:.0%}) matched a projection. The ranking below "
+              f"covers just those {len(subjects)}.\n", file=sys.stderr)
 
     analysis = flagging.analyze(subjects, degree=args.degree,
                                 split_by_role=not args.pool,
