@@ -23,8 +23,11 @@ In OOTP: pick your player list, switch to one of the ratings views below, then
 **Report → Write report to disk**. That saves an HTML file (and opens it in your
 browser — you can ignore the browser window). Then:
 
+OOTP does not prompt for a location — it writes a timestamped file into the
+save's own folder and opens it in your browser. So just ask for the newest one:
+
 ```bash
-python -m ootp_scout prepare "path\to\that\report.html"
+python -m ootp_scout prepare --latest --scale "1 to 100"
 ```
 
 This reads OOTP's HTML directly, checks it against what the calculator accepts,
@@ -37,8 +40,11 @@ and puts the paste block **on your clipboard**. Then:
 4. Click **DOWNLOAD CSV**
 
 ```bash
-python -m ootp_scout flag "path\to\that\report.html" "$env:USERPROFILE\Downloads\batter-projections.csv" --out targets.csv
+python -m ootp_scout flag latest "$env:USERPROFILE\Downloads\batter-projections.csv" --out targets.csv
 ```
+
+`latest` resolves to the same file `--latest` picked, so long as you have not
+written another report in between. A path works anywhere `latest` does.
 
 HTML, TSV and CSV are all accepted wherever a report is expected, so if you
 prefer to select the table in the browser and copy it yourself, paste it into a

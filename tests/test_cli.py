@@ -157,7 +157,7 @@ class PrepareCommandTest(unittest.TestCase):
             code, _, err = run(["prepare", bad, "--scale", "20 to 80"])
         self.assertEqual(code, 1)
         self.assertIn("multiple of 5", err)
-        self.assertIn("1-100", err)
+        self.assertIn('--scale "1 to 100"', err)
 
     def test_same_values_pass_on_the_1_100_scale(self):
         with tempfile.TemporaryDirectory() as folder:

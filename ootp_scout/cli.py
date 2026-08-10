@@ -12,7 +12,9 @@ import argparse
 import csv
 import sys
 
-from . import clipboard, flagging, projections, tables, views
+from datetime import datetime
+
+from . import (clipboard, flagging, projections, reports, tables, views)
 
 BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
@@ -31,7 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     prepare = subparsers.add_parser(
         "prepare", help="check an OOTP report and emit a paste-ready block")
-    prepare.add_argument("report", help="the OOTP report saved to disk (TSV/CSV)")
+    prepare.add_argument("report", nargs="?",
+                         help="the OOTP report (HTML/TSV/CSV). Omit it and pass "
+                              "--latest to use the report OOTP wrote most "
+                              "recently.")
+    prepare.add_argument("--latest", action="store_true",
+                         help="use the most recent report OOTP wrote to disk")
     prepare.add_argument("--out", help="write the paste block here "
                                        "(default: alongside the report)")
     prepare.add_argument("--scale", default="20 to 80", choices=views.SCALES,
@@ -43,7 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     flag = subparsers.add_parser(
         "flag", help="join a report with calculator projections and rank")
-    flag.add_argument("report", help="the same OOTP report you pasted in")
+    flag.add_argument("report", help="the same OOTP report you pasted in; the "
+                                     "word 'latest' resolves to the most recent "
+                                     "report OOTP wrote")
     flag.add_argument("projections", help="*-projections.csv from the calculator")
     flag.add_argument("--out", help="write the flagged players to this CSV")
     flag.add_argument("--limit", type=int, default=25,
@@ -59,6 +68,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def resolve_report(value: str | None, use_latest: bool = False) -> str:
+    """Turn the report argument into a path, honouring 'latest'."""
+    wants_latest = use_latest or (value or "").lower() == "latest"
+    if not wants_latest:
+        if not value:
+            raise SystemExit("error: give a report file, or use --latest for the "
+                             "one OOTP wrote most recently")
+        return value
+    found = reports.find_latest()
+    stamp = datetime.fromtimestamp(found.modified).strftime("%Y-%m-%d %H:%M")
+    print(f"Using the most recent report: {found.save}, written {stamp}")
+    print(f"  {found.path}")
+    return found.path
+
+
 def _load_report(path: str) -> tuple[views.View, list[views.ExportRow], list]:
     headers, raw_rows = tables.read_table(path)
     view = views.identify_view(headers)
@@ -68,8 +92,9 @@ def _load_report(path: str) -> tuple[views.View, list[views.ExportRow], list]:
 
 def command_prepare(args: argparse.Namespace) -> int:
     try:
-        view, rows, problems = _load_report(args.report)
-        headers, raw_rows = tables.read_table(args.report)
+        report = resolve_report(args.report, args.latest)
+        view, rows, problems = _load_report(report)
+        headers, raw_rows = tables.read_table(report)
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -86,9 +111,10 @@ def command_prepare(args: argparse.Namespace) -> int:
         if len(complaints) > 15:
             print(f"  ... and {len(complaints) - 15} more", file=sys.stderr)
         if args.scale == views.SCALE_STEP_5:
-            print("\nThe 20-80 scale only accepts multiples of 5. Switch OOTP to "
-                  "the 1-100 scale and re-export - it keeps the resolution that "
-                  "20-80 rounds away.", file=sys.stderr)
+            print("\nThe 20-80 scale only accepts multiples of 5, so this export "
+                  "is almost certainly not on that scale. If OOTP is set to "
+                  "1-100, re-run with --scale \"1 to 100\" and set the site's "
+                  "RATINGS SCALE dropdown to match.", file=sys.stderr)
         return 1
 
     for line_number, detail in problems:
@@ -99,7 +125,7 @@ def command_prepare(args: argparse.Namespace) -> int:
     keep = [h for h in view.headers] + [h for h in view.optional if h in cleaned]
     out_rows = [[row.values.get(h, "") for h in keep] for row in rows]
 
-    destination = args.out or f"{args.report.rsplit('.', 1)[0]}.paste.tsv"
+    destination = args.out or f"{report.rsplit('.', 1)[0]}.paste.tsv"
     tables.write_tsv(destination, keep, out_rows)
 
     copied = False
@@ -123,14 +149,15 @@ def command_prepare(args: argparse.Namespace) -> int:
     else:
         print(f"  3. Paste the whole contents of {destination}, click SUBMIT")
     print("  4. Click DOWNLOAD CSV")
-    print(f"  5. python -m ootp_scout flag {args.report} "
+    print(f"  5. python -m ootp_scout flag \"{report}\" "
           f"{view.role}-projections.csv")
     return 0
 
 
 def command_flag(args: argparse.Namespace) -> int:
     try:
-        view, rows, problems = _load_report(args.report)
+        report = resolve_report(args.report)
+        view, rows, problems = _load_report(report)
     except (OSError, ValueError) as error:
         print(f"error reading {args.report}: {error}", file=sys.stderr)
         return 1
