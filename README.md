@@ -114,17 +114,6 @@ residual ranking finer — a 20-80 pool puts many players on identical grades,
 which flattens the fit. It is a marginal gain, not a reason to change a save
 you are happy with.
 
-## Rate everyone on the MLB scale
-
-OOTP can display ratings *relative to each player's own level*. Under that
-setting a AAA player's 60 means "60 for AAA" — but the calculator projects MLB
-production from whatever numbers it is given, so it would read that as MLB
-talent and overrate every minor leaguer in the pool.
-
-Set OOTP to show ratings for the majors, not relative to level, before
-exporting. The tool cannot see the setting, so `prepare` instead reports when a
-pool contains non-MLB levels and reminds you.
-
 ## How the flagging works
 
 Ranking by projected WAR would just re-list the players you already know are

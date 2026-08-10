@@ -134,17 +134,6 @@ def command_prepare(args: argparse.Namespace) -> int:
     for line_number, detail in problems:
         print(f"  skipped line {line_number}: {detail}", file=sys.stderr)
 
-    minors = views.non_mlb_levels(rows)
-    if minors:
-        listed = ", ".join(f"{level} ({count})" for level, count
-                           in sorted(minors.items(), key=lambda p: -p[1]))
-        print(f"\nHeads up: this pool includes non-MLB levels - {listed}.")
-        print("The calculator projects MLB production from whatever ratings it "
-              "is given, so those ratings must be on the MLB scale. In OOTP, "
-              "make sure player ratings are shown for the majors rather than "
-              "relative to each player's own level, or every minor leaguer "
-              "here will look better than he is.")
-
     # Emit exactly the required columns, in the calculator's own order.
     cleaned = [views._clean(h) for h in headers]
     keep = [h for h in view.headers] + [h for h in view.optional if h in cleaned]

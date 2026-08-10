@@ -191,31 +191,6 @@ def parse_rows(headers: list[str], rows: list[list[str]], view: View
     return parsed, problems
 
 
-MLB_LEVELS = {"MLB", "ML", "MAJ", "MAJORS", ""}
-
-
-def levels_present(rows: list[ExportRow]) -> dict[str, int]:
-    """Count the levels in the export, if it carries a Lev column.
-
-    Matters because OOTP can display ratings *relative to the player's own
-    level*. Under that setting a AAA player's 60 means "60 for AAA", and the
-    calculator - which projects MLB production from whatever numbers it is
-    given - would read it as MLB talent and badly overrate every minor leaguer.
-    The tool cannot see the setting, so it surfaces the exposure instead.
-    """
-    counts: dict[str, int] = {}
-    for row in rows:
-        level = (row.values.get("Lev") or row.values.get("Level") or "").strip()
-        if level:
-            counts[level] = counts.get(level, 0) + 1
-    return counts
-
-
-def non_mlb_levels(rows: list[ExportRow]) -> dict[str, int]:
-    return {level: count for level, count in levels_present(rows).items()
-            if level.upper() not in MLB_LEVELS}
-
-
 def validate_ratings(rows: list[ExportRow], view: View, scale: str
                      ) -> list[tuple[str, str]]:
     """Pre-check the rules the calculator enforces, so failures are legible.

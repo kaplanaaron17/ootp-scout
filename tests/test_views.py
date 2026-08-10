@@ -126,32 +126,6 @@ class ParseRowsTest(unittest.TestCase):
         self.assertEqual(rows[0].scouting_accuracy, "unknown")
 
 
-class LevelsTest(unittest.TestCase):
-    def _rows(self, levels):
-        headers = BATTER_CURRENT + ["Lev"]
-        view = views.identify_view(headers)
-        raw = [row_for(BATTER_CURRENT) + [level] for level in levels]
-        rows, _ = views.parse_rows(headers, raw, view)
-        return rows
-
-    def test_counts_levels(self):
-        counts = views.levels_present(self._rows(["AAA", "AAA", "MLB"]))
-        self.assertEqual(counts, {"AAA": 2, "MLB": 1})
-
-    def test_non_mlb_levels_excludes_the_majors(self):
-        minors = views.non_mlb_levels(self._rows(["AAA", "AA", "MLB", "MLB"]))
-        self.assertEqual(minors, {"AAA": 1, "AA": 1})
-
-    def test_an_all_mlb_pool_reports_nothing(self):
-        self.assertEqual(views.non_mlb_levels(self._rows(["MLB", "MLB"])), {})
-
-    def test_missing_level_column_is_not_an_error(self):
-        view = views.identify_view(BATTER_CURRENT)
-        rows, _ = views.parse_rows(BATTER_CURRENT,
-                                   [row_for(BATTER_CURRENT)], view)
-        self.assertEqual(views.non_mlb_levels(rows), {})
-
-
 class ValidateRatingsTest(unittest.TestCase):
     def setUp(self):
         self.view = views.identify_view(BATTER_CURRENT)
