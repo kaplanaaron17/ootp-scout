@@ -67,8 +67,16 @@ View: Batting Ratings   Grade column: OVR   Matched: 41 of 41 players
   3  Player 03                SS    19    50   2.70   0.49  +2.21  1.17  Normal
 ```
 
+Name the output `.xlsx` and you get a formatted spreadsheet instead of a CSV:
+frozen header, autofilter, and rows tinted by how large the differential is —
+**green** at z ≥ 2.0, **amber** at z ≥ 1.0. A second sheet records the fitted
+line, the position offsets and the highlight thresholds, so the numbers can be
+argued with rather than just trusted. `--highlight-z` moves the green
+threshold. Writing `.xlsx` needs `openpyxl`; a `.csv` name stays
+dependency-free.
+
 Useful flags on `flag`: `--limit`, `--min-z 1.5`, `--degree 2` (fit a curve),
-`--pool` (fit hitters and pitchers together).
+`--pool` (fit hitters and pitchers together), `--no-position`.
 
 ## Getting the export out of OOTP
 
@@ -106,6 +114,17 @@ residual ranking finer — a 20-80 pool puts many players on identical grades,
 which flattens the fit. It is a marginal gain, not a reason to change a save
 you are happy with.
 
+## Rate everyone on the MLB scale
+
+OOTP can display ratings *relative to each player's own level*. Under that
+setting a AAA player's 60 means "60 for AAA" — but the calculator projects MLB
+production from whatever numbers it is given, so it would read that as MLB
+talent and overrate every minor leaguer in the pool.
+
+Set OOTP to show ratings for the majors, not relative to level, before
+exporting. The tool cannot see the setting, so `prepare` instead reports when a
+pool contains non-MLB levels and reminds you.
+
 ## How the flagging works
 
 Ranking by projected WAR would just re-list the players you already know are
@@ -113,9 +132,20 @@ good. Instead the tool fits projected WAR against the grade across the whole
 pool, then ranks by **residual** — how far a player sits above the WAR his grade
 predicts.
 
-Hitters and pitchers are fit separately by default; their WAR distributions
-differ enough that pooling them leaks one group's shape into the other's
-residuals.
+Two things are held constant while measuring that gap:
+
+- **Role** — hitters and pitchers are fit separately; their WAR distributions
+  differ enough that pooling them leaks one group's shape into the other's
+  residuals. `--pool` overrides.
+- **Position** — each position gets its own intercept shift, so a catcher is
+  measured against catchers. Positions share one slope, which is what makes
+  this survive thin positions: fitting DH separately on four players would be
+  noise, but a DH offset on a shared slope is one well-supported number. A
+  position needs at least 4 players to earn an offset; below that the player is
+  measured against the group's reference position. `--no-position` overrides.
+
+The fitted offsets are printed each run and recorded in the spreadsheet, so you
+can see what the adjustment actually did.
 
 `z_score` is the residual in standard deviations, so it is comparable across
 runs and across pools of different sizes. If the grade is constant across a

@@ -14,7 +14,8 @@ import sys
 
 from datetime import datetime
 
-from . import (clipboard, flagging, projections, reports, tables, views)
+from . import (clipboard, flagging, projections, reports, spreadsheet,
+               tables, views)
 
 BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
@@ -57,7 +58,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="the CSV downloaded from the calculator; the word "
                            "'latest' finds the newest *-projections.csv in your "
                            "Downloads folder")
-    flag.add_argument("--out", help="write the flagged players to this CSV")
+    flag.add_argument("--out", help="write the flagged players here; a .xlsx "
+                                    "name gets a formatted, highlighted "
+                                    "spreadsheet, anything else a plain CSV")
     flag.add_argument("--limit", type=int, default=25,
                       help="how many players to report (default: 25)")
     flag.add_argument("--min-z", type=float, default=None,
@@ -68,6 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
                            "(default: 1; try 2 if the relationship curves)")
     flag.add_argument("--pool", action="store_true",
                       help="fit hitters and pitchers together")
+    flag.add_argument("--no-position", dest="position_adjust",
+                      action="store_false",
+                      help="do not give each position its own baseline")
+    flag.set_defaults(position_adjust=True)
+    flag.add_argument("--highlight-z", type=float, default=spreadsheet.STRONG_Z,
+                      help="differential (in standard deviations) that counts "
+                           "as a strong flag in the spreadsheet "
+                           f"(default: {spreadsheet.STRONG_Z})")
     return parser
 
 
@@ -123,6 +134,17 @@ def command_prepare(args: argparse.Namespace) -> int:
     for line_number, detail in problems:
         print(f"  skipped line {line_number}: {detail}", file=sys.stderr)
 
+    minors = views.non_mlb_levels(rows)
+    if minors:
+        listed = ", ".join(f"{level} ({count})" for level, count
+                           in sorted(minors.items(), key=lambda p: -p[1]))
+        print(f"\nHeads up: this pool includes non-MLB levels - {listed}.")
+        print("The calculator projects MLB production from whatever ratings it "
+              "is given, so those ratings must be on the MLB scale. In OOTP, "
+              "make sure player ratings are shown for the majors rather than "
+              "relative to each player's own level, or every minor leaguer "
+              "here will look better than he is.")
+
     # Emit exactly the required columns, in the calculator's own order.
     cleaned = [views._clean(h) for h in headers]
     keep = [h for h in view.headers] + [h for h in view.optional if h in cleaned]
@@ -153,7 +175,7 @@ def command_prepare(args: argparse.Namespace) -> int:
         print(f"  3. Paste the whole contents of {destination}, click SUBMIT")
     print(f"  4. Click DOWNLOAD CSV (it saves as "
           f"{view.calculator_type}-projections.csv)")
-    print("  5. python -m ootp_scout flag latest latest --out targets.csv")
+    print("  5. python -m ootp_scout flag latest latest --out targets.xlsx")
     return 0
 
 
@@ -198,16 +220,22 @@ def command_flag(args: argparse.Namespace) -> int:
         return 1
 
     analysis = flagging.analyze(subjects, degree=args.degree,
-                                split_by_role=not args.pool)
+                                split_by_role=not args.pool,
+                                position_adjust=args.position_adjust)
     findings = flagging.select(analysis.findings, limit=args.limit,
                                min_z=args.min_z)
 
     print(f"View: {view.ootp_view_name}   Grade column: {view.grade_column}   "
           f"Matched: {len(subjects)} of {len(rows)} players")
     for fit in analysis.fits:
-        slope = fit.coefficients[1] if len(fit.coefficients) > 1 else 0.0
-        print(f"  fit[{fit.group}] n={fit.count} slope={slope:+.4f} "
-              f"WAR per grade point, residual sd={fit.residual_sd:.2f}")
+        print(f"  fit[{fit.group}] n={fit.count} slope={fit.slope:+.4f} "
+              f"WAR per grade point, residual sd={fit.residual_sd:.2f}"
+              + (f" ({fit.note})" if fit.note else ""))
+        offsets = fit.position_offsets
+        if offsets:
+            shown = ", ".join(f"{name} {value:+.2f}" for name, value
+                              in sorted(offsets.items(), key=lambda p: -p[1]))
+            print(f"    position offsets vs {fit.reference_position}: {shown}")
     print()
 
     if not findings:
