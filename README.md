@@ -1,93 +1,120 @@
 # ootp-scout
 
-Takes an OOTP CSV export and flags players whose WAR projection outruns their
-overall grade — the ones the scouting number underrates. Two modes:
+Finds OOTP players whose WAR projection outruns their scouting grade — the ones
+the OVR/POT number underrates. WAR comes from
+[ootpcalculator.com](https://ootpcalculator.com); this tool prepares the input,
+then ranks the output by how far each player beats his grade.
 
-- `--mode current` — current ratings vs **OVR**: players to target now.
-- `--mode potential` — potential ratings vs **POT**: prospects.
+Two systems, one per grade column:
+
+- **Players to target** — current ratings vs **OVR**
+- **Prospects** — potential ratings vs **POT**
+
+Which one you get is determined by the OOTP view you export; the tool detects it.
 
 Pure standard library. No install, no dependencies.
 
-## Usage
+## Workflow
+
+The calculator is a website with no API, so there is one manual paste in the
+middle. It is per *pool*, not per player — a few clicks for a whole draft class.
 
 ```bash
-python -m ootp_scout draft_pool.csv --mode potential --limit 25 --out prospects.csv
+python -m ootp_scout prepare pool.tsv --scale "20 to 80"
 ```
 
-Useful flags:
+That checks the export, tells you which view it found, and writes
+`pool.paste.tsv`. Then:
 
-| Flag | What it does |
-| --- | --- |
-| `--war-column WAR` | Use a WAR column already in the CSV instead of the built-in model |
-| `--min-z 1.5` | Only report players this many standard deviations above expected |
-| `--degree 2` | Fit a curve instead of a line, if the grade-to-WAR relationship bends |
-| `--scale 20-80` | Override rating-scale auto-detection |
-| `--pool` | Fit hitters and pitchers together instead of separately |
+1. Open the [batter](https://ootpcalculator.com/batter-projections) or
+   [pitcher](https://ootpcalculator.com/pitcher-projections) projections page
+2. Set **RATINGS SCALE** to match your export, then click **BATCH INPUT**
+3. Paste the whole file, click **SUBMIT**
+4. Click **DOWNLOAD CSV**
 
-## What the export needs
-
-The default `draft_pool_default` view **will not work**. It exports:
-
-```
-POS, #, Name, Inf, DOB, Age, NAT, HT, WT, B, T, OVR, POT, Prone, DEM, Sign, SctAcc
+```bash
+python -m ootp_scout flag pool.tsv batter-projections.csv --out targets.csv
 ```
 
-OVR and POT are the *outputs* of the game's own rating weights, not inputs — there
-is nothing to project from. Edit the view in-game to add the individual ratings,
-then re-export:
+Output:
 
-- **Hitters** — Contact, Gap, Power, Eye, Avoid K's, Speed, Stealing, Defense, Arm, Range
-- **Pitchers** — Stuff, Movement, Control, Stamina
-- **Keep** OVR and POT (the baselines the flag measures against) and SctAcc
-- For a real prospect run, add the **potential** ratings columns too. Without them
-  `--mode potential` falls back to current ratings against the POT grade and says so.
+```
+View: Batting Ratings   Grade column: OVR   Matched: 41 of 41 players
+  fit[hitters] n=41 slope=+0.2191 WAR per grade point, residual sd=1.90
 
-Header names are matched loosely (`Con` / `Contact` / `Contact Rating` all work), so
-you don't have to match any exact naming. Unrecognized columns are ignored.
+  #  Player                   Pos  Age   OVR    WAR    Exp   Diff     z  Scouting
+---------------------------------------------------------------------------------
+  1  Sleeper Sam              CF    20    35   7.30  -2.80 +10.10  5.32  Low
+  2  Player 28                SS    21    55   3.80   1.58  +2.22  1.17  High
+  3  Player 03                SS    19    50   2.70   0.49  +2.21  1.17  Normal
+```
 
-Set the game's rating scale to **20-80** or **1-100**. The 1-20 and star scales are
-rejected with an explanation rather than silently used — they lose too much
-resolution to project from.
+Useful flags on `flag`: `--limit`, `--min-z 1.5`, `--degree 2` (fit a curve),
+`--pool` (fit hitters and pitchers together).
+
+## Getting the export out of OOTP
+
+In OOTP, find the players you want, switch to one of these four views, then
+**Report → Write report to disk**, and save the page. The calculator accepts
+exactly these column sets and nothing else:
+
+| View | Grade | Ratings |
+| --- | --- | --- |
+| Batting Ratings | OVR | CON, GAP, POW, EYE, K's, CON/POW vL/vR, BUN, BFH, SPE, STE, DEF |
+| Batting Ratings (potential) | POT | CON P, GAP P, POW P, EYE P, K P, SPE, STE, RUN, DEF |
+| Pitching Ratings | OVR | STU, MOV, CON, STU vL/vR, VELO, STM, G/F, HLD |
+| Pitching Ratings (potential) | POT | STU P, MOV P, CON P, VELO, STM, G/F, HLD |
+
+All four also want `POS, #, Name, Inf, Age, B, T, SctAcc`, and optionally
+`BABIP`/`SR` for batters or `HRA`/`BABIP` for pitchers. Extra columns and the
+sort-arrow glyph on the sorted column are tolerated.
+
+The **default draft-pool view will not work** — it exports OVR and POT and no
+underlying ratings, so there is nothing to project from. `prepare` says so and
+names the view you want instead.
+
+### Use the 1-100 scale
+
+On the 20-80 scale the calculator rejects any rating that is not a multiple of
+5, because OOTP rounds to the nearest grade when it displays that scale. The
+1-100 scale keeps the resolution that 20-80 throws away, and it makes the
+residual ranking finer. `prepare` validates this before you paste and names the
+player and column at fault, rather than letting the site reject the whole batch
+with a generic message.
 
 ## How the flagging works
 
-Ranking by projected WAR would just re-list the players you already know are good.
-Instead the tool fits projected WAR against the overall grade across the whole pool,
-then ranks by **residual** — how far a player sits above the WAR his grade predicts.
+Ranking by projected WAR would just re-list the players you already know are
+good. Instead the tool fits projected WAR against the grade across the whole
+pool, then ranks by **residual** — how far a player sits above the WAR his grade
+predicts.
 
-Hitters and pitchers are fit separately by default; their WAR distributions differ
-enough that pooling them leaks one group's shape into the other's residuals.
+Hitters and pitchers are fit separately by default; their WAR distributions
+differ enough that pooling them leaks one group's shape into the other's
+residuals.
 
-`z_score` is the residual in standard deviations, so it's comparable across runs and
-across pools of different sizes. If the grade column is constant across a group (a
-draft pool where everyone's POT is 80), the fit falls back to the group mean and
-every row is annotated with a note saying so.
+`z_score` is the residual in standard deviations, so it is comparable across
+runs and across pools of different sizes. If the grade is constant across a
+group (a draft pool where everyone's POT is 80), the fit falls back to the group
+mean and every row is annotated saying so.
 
-**Scouting accuracy is reported, never filtered on.** Every flagged player carries
-his `SctAcc` value into the output, so a hit on a Low-accuracy report is visible as
-such and you can discount it yourself.
+**Scouting accuracy is reported, never filtered on.** Every flagged player
+carries his `SctAcc` into the output, so a hit off a Low-accuracy report is
+visible as one and you can discount it yourself.
 
-## The WAR model is a placeholder
+## Things that will bite you
 
-`war_model.py` ships a `ProvisionalModel` whose coefficients are hand-set to be
-monotone and plausibly weighted — **not** calibrated against OOTP's engine. It exists
-so the pipeline runs end to end and so the flagging logic can be tested. Do not treat
-its WAR values as accurate.
-
-One artifact to be aware of: the placeholder applies a positional adjustment (catcher
-+1.0 wins, first base −1.0) that OVR does not, so catchers drift to the top of a
-current-mode run. That is the model disagreeing with the grade, not a scouting error.
-A calibrated model would not do this.
-
-Two ways to replace it, both already wired:
-
-1. **`--war-column`** — put real WAR numbers in the CSV (paste in a calculator's
-   output, or export the game's own projection) and no math is done here at all.
-2. **Write a new model class** with a `project(player, tools, scale) -> Projection`
-   method once the real calculator's formula is known.
-
-The flagging in `flagging.py` doesn't care which model produced the WAR value, so
-swapping the model disturbs nothing downstream.
+- **`CON` means Contact in the batter views and Control in the pitcher views.**
+  The column name alone is ambiguous, which is why parsing is view-based rather
+  than column-based.
+- **The calculator's CSV is not quoted.** It joins fields with commas, so a
+  player whose name contains a comma splits into an extra column. `flag` reports
+  those rows by line number instead of dropping them silently.
+- **Joins are by name.** Duplicate names are dropped and reported rather than
+  resolved by guessing.
+- The calculator states it is tuned for 2026 MLB saves; a very different league
+  environment will shift the WAR scale. That mostly cancels out in the residual,
+  since every player is measured against the same fitted line.
 
 ## Tests
 
@@ -95,5 +122,6 @@ swapping the model disturbs nothing downstream.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-45 tests. `sample_pool.csv` is a generated fixture containing a deliberately planted
-sleeper (elite tools, OVR 35) used to confirm the flagging surfaces him.
+55 tests. `tests/fixtures/` holds a 41-player export and the projections
+ootpcalculator.com actually returned for it, including a planted player whose
+tools are elite and whose OVR is 35 — he must come out first.

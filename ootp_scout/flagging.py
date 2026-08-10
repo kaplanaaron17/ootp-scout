@@ -13,10 +13,20 @@ would leak one group's shape into the other's residuals.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from statistics import fmean, pstdev
 
-from .loading import Player
+
+@dataclass
+class Subject:
+    """A player carrying both his grade and his projected WAR."""
+
+    name: str
+    position: str
+    grade: float
+    war: float
+    is_pitcher: bool = False
+    meta: dict[str, str] = field(default_factory=dict)
 
 
 def solve(matrix: list[list[float]], rhs: list[float]) -> list[float]:
@@ -51,7 +61,6 @@ def fit_polynomial(xs: list[float], ys: list[float], degree: int = 1) -> list[fl
         raise ValueError(f"need more than {degree} points to fit degree {degree}")
 
     size = degree + 1
-    # Normal equations: (X'X) b = X'y, built from power sums.
     power_sums = [sum(x ** p for x in xs) for p in range(2 * degree + 1)]
     matrix = [[power_sums[i + j] for j in range(size)] for i in range(size)]
     rhs = [sum(y * (x ** i) for x, y in zip(xs, ys)) for i in range(size)]
@@ -64,9 +73,7 @@ def evaluate(coefficients: list[float], x: float) -> float:
 
 @dataclass
 class Finding:
-    player: Player
-    war: float
-    baseline: float
+    subject: Subject
     expected_war: float
     residual: float
     z_score: float
@@ -75,7 +82,7 @@ class Finding:
 
     @property
     def scouting_accuracy(self) -> str:
-        return self.player.meta.get("scouting_accuracy", "") or "unknown"
+        return self.subject.meta.get("scouting_accuracy", "") or "unknown"
 
 
 @dataclass
@@ -90,44 +97,25 @@ class GroupFit:
 class Analysis:
     findings: list[Finding]
     fits: list[GroupFit]
-    excluded: list[tuple[str, str]]
 
 
-def _group_of(player: Player) -> str:
-    return "pitchers" if player.is_pitcher else "hitters"
-
-
-def analyze(scored: list[tuple[Player, float]], mode: str, degree: int = 1,
+def analyze(subjects: list[Subject], degree: int = 1,
             split_by_role: bool = True) -> Analysis:
-    """Fit WAR against the overall grade and score every player's residual.
-
-    `scored` pairs each player with the WAR projection already computed for him.
-    """
-    excluded: list[tuple[str, str]] = []
-    usable: list[tuple[Player, float, float]] = []
-
-    for player, war in scored:
-        baseline = player.baseline(mode)
-        if baseline is None:
-            label = "POT" if mode == "potential" else "OVR"
-            excluded.append((player.name, f"no {label} value to compare against"))
-            continue
-        usable.append((player, war, baseline))
-
-    groups: dict[str, list[tuple[Player, float, float]]] = {}
-    for entry in usable:
-        key = _group_of(entry[0]) if split_by_role else "all"
-        groups.setdefault(key, []).append(entry)
+    """Fit WAR against the overall grade and score every player's residual."""
+    groups: dict[str, list[Subject]] = {}
+    for subject in subjects:
+        key = ("pitchers" if subject.is_pitcher else "hitters") if split_by_role else "all"
+        groups.setdefault(key, []).append(subject)
 
     findings: list[Finding] = []
     fits: list[GroupFit] = []
 
-    for group, entries in sorted(groups.items()):
-        xs = [baseline for _p, _w, baseline in entries]
-        ys = [war for _p, war, _b in entries]
+    for group, members in sorted(groups.items()):
+        xs = [s.grade for s in members]
+        ys = [s.war for s in members]
 
         effective_degree = degree
-        while effective_degree > 0 and len(entries) <= effective_degree + 1:
+        while effective_degree > 0 and len(members) <= effective_degree + 1:
             effective_degree -= 1
 
         try:
@@ -140,21 +128,22 @@ def analyze(scored: list[tuple[Player, float]], mode: str, degree: int = 1,
         else:
             note = ""
 
-        residuals = [war - evaluate(coefficients, baseline)
-                     for _p, war, baseline in entries]
+        residuals = [s.war - evaluate(coefficients, s.grade) for s in members]
         spread = pstdev(residuals) if len(residuals) > 1 else 0.0
-        fits.append(GroupFit(group=group, count=len(entries),
+        fits.append(GroupFit(group=group, count=len(members),
                              coefficients=coefficients, residual_sd=spread))
 
-        for (player, war, baseline), residual in zip(entries, residuals):
-            expected = evaluate(coefficients, baseline)
-            z_score = residual / spread if spread > 1e-9 else 0.0
-            findings.append(Finding(player=player, war=war, baseline=baseline,
-                                    expected_war=expected, residual=residual,
-                                    z_score=z_score, group=group, note=note))
+        for subject, residual in zip(members, residuals):
+            findings.append(Finding(
+                subject=subject,
+                expected_war=evaluate(coefficients, subject.grade),
+                residual=residual,
+                z_score=residual / spread if spread > 1e-9 else 0.0,
+                group=group,
+                note=note))
 
     findings.sort(key=lambda f: f.residual, reverse=True)
-    return Analysis(findings=findings, fits=fits, excluded=excluded)
+    return Analysis(findings=findings, fits=fits)
 
 
 def select(findings: list[Finding], limit: int | None = None,
