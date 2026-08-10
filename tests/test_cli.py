@@ -116,7 +116,7 @@ class FlagCommandTest(unittest.TestCase):
                  "--overrated", "0", "--out", destination])
             book = openpyxl.load_workbook(destination)
             try:
-                sheet = book["Targets"]
+                sheet = book["Players"]
                 headers = [c.value for c in sheet[1]]
                 self.assertIn("rWAR", headers)
                 self.assertIn("rWAR - WAR", headers)
@@ -160,42 +160,58 @@ class FlagCommandTest(unittest.TestCase):
         _, out, _ = run(["flag", REPORT, PROJECTIONS, "--overrated", "0"])
         self.assertNotIn("MOST OVERRATED", out)
 
-    def test_overrated_gets_its_own_sheet(self):
+    def test_spreadsheet_holds_the_whole_pool_regardless_of_limit(self):
+        """--limit trims the printed tables; the sheet keeps everyone."""
         try:
             import openpyxl
         except ImportError:
             self.skipTest("openpyxl is not installed")
         with tempfile.TemporaryDirectory() as folder:
-            destination = os.path.join(folder, "targets.xlsx")
-            run(["flag", REPORT, PROJECTIONS, "--limit", "4", "--overrated", "4",
-                 "--out", destination])
+            destination = os.path.join(folder, "pool.xlsx")
+            _, out, _ = run(["flag", REPORT, PROJECTIONS, "--limit", "3",
+                             "--out", destination])
             book = openpyxl.load_workbook(destination)
             try:
-                self.assertIn("Overrated", book.sheetnames)
-                sheet = book["Overrated"]
-                self.assertEqual(sheet.max_row, 5)
-                worst = sheet.cell(row=2, column=9).value
-                self.assertLess(worst, 0)
-                # Strong negatives are tinted red, not green.
-                self.assertEqual(sheet.cell(row=2, column=2).fill.fgColor.rgb,
-                                 "FFFFC7CE")
+                self.assertEqual(book.sheetnames,
+                                 ["Players", "How this was calculated"])
+                self.assertEqual(book["Players"].max_row, 42)   # 41 players
             finally:
                 book.close()
+        self.assertIn("all 41 players", out)
 
-    def test_no_overrated_sheet_when_disabled(self):
+    def test_spreadsheet_tints_both_directions(self):
         try:
             import openpyxl
         except ImportError:
             self.skipTest("openpyxl is not installed")
         with tempfile.TemporaryDirectory() as folder:
-            destination = os.path.join(folder, "targets.xlsx")
-            run(["flag", REPORT, PROJECTIONS, "--overrated", "0",
-                 "--out", destination])
+            destination = os.path.join(folder, "pool.xlsx")
+            run(["flag", REPORT, PROJECTIONS, "--out", destination])
             book = openpyxl.load_workbook(destination)
             try:
-                self.assertNotIn("Overrated", book.sheetnames)
+                sheet = book["Players"]
+                fills = [sheet.cell(row=r, column=2).fill.fgColor.rgb
+                         for r in range(2, sheet.max_row + 1)]
             finally:
                 book.close()
+        self.assertIn("FFC7EFCE", fills)   # an underrated player, green
+        self.assertIn("FFFFC7CE", fills)   # an overrated player, red
+
+    def test_spreadsheet_carries_the_tool_ratings(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "pool.xlsx")
+            run(["flag", REPORT, PROJECTIONS, "--out", destination])
+            book = openpyxl.load_workbook(destination)
+            try:
+                headers = [c.value for c in book["Players"][1]]
+            finally:
+                book.close()
+        for column in ("CON", "POW", "EYE", "DEF"):
+            self.assertIn(column, headers)
 
     def test_xlsx_out_writes_a_real_spreadsheet(self):
         """--out foo.xlsx must produce a workbook, not CSV text renamed.
@@ -213,7 +229,8 @@ class FlagCommandTest(unittest.TestCase):
                 magic = handle.read(4)
         # Every .xlsx is a zip archive.
         self.assertEqual(magic, b"PK\x03\x04")
-        self.assertIn("highlighted", out)
+        self.assertIn("underrated", out)
+        self.assertIn("overrated", out)
 
     def test_xlsx_out_is_readable_as_a_workbook(self):
         try:
@@ -226,10 +243,10 @@ class FlagCommandTest(unittest.TestCase):
                  "--out", destination])
             book = openpyxl.load_workbook(destination)
             try:
-                self.assertIn("Targets", book.sheetnames)
+                self.assertIn("Players", book.sheetnames)
                 self.assertIn("How this was calculated", book.sheetnames)
-                sheet = book["Targets"]
-                self.assertEqual(sheet.max_row, 6)  # header plus 5 players
+                sheet = book["Players"]
+                self.assertEqual(sheet.max_row, 42)  # the whole pool
                 self.assertEqual(sheet.cell(row=1, column=6).value, "OVR")
             finally:
                 book.close()

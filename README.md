@@ -12,7 +12,8 @@ Two systems, one per grade column:
 
 Which one you get is determined by the OOTP view you export; the tool detects it.
 
-Pure standard library. No install, no dependencies.
+Standard library only, except that writing `.xlsx` uses `openpyxl` if you
+have it. CSV output needs nothing at all.
 
 ## Workflow
 
@@ -20,31 +21,34 @@ The calculator is a website with no API, so there is one manual paste in the
 middle. It is per *pool*, not per player — a few clicks for a whole draft class.
 
 In OOTP: pick your player list, switch to one of the ratings views below, then
-**Report → Write report to disk**. That saves an HTML file (and opens it in your
-browser — you can ignore the browser window). Then:
-
-OOTP does not prompt for a location — it writes a timestamped file into the
-save's own folder and opens it in your browser. So just ask for the newest one:
+**Report → Write report to disk**. OOTP does not prompt for a location — it
+writes a timestamped file into the save's own folder and opens it in your
+browser, which you can ignore. So just ask for the newest one:
 
 ```bash
-python -m ootp_scout prepare --latest --scale "1 to 100"
+python -m ootp_scout prepare --latest
 ```
 
-This reads OOTP's HTML directly, checks it against what the calculator accepts,
-and puts the paste block **on your clipboard**. Then:
+This reads OOTP's HTML directly, works out the rating scale, checks the export
+against what the calculator accepts, and puts the paste block **on your
+clipboard**. Then:
 
 1. Open the [batter](https://ootpcalculator.com/batter-projections) or
    [pitcher](https://ootpcalculator.com/pitcher-projections) projections page
-2. Set **RATINGS SCALE** to match your export, then click **BATCH INPUT**
+2. Set **RATINGS SCALE** to the scale `prepare` reported, then click **BATCH INPUT**
 3. **Ctrl+V**, click **SUBMIT**
 4. Click **DOWNLOAD CSV**
 
 ```bash
-python -m ootp_scout flag latest "$env:USERPROFILE\Downloads\batter-projections.csv" --out targets.csv
+python -m ootp_scout flag latest latest --out targets.xlsx
 ```
 
-`latest` resolves to the same file `--latest` picked, so long as you have not
-written another report in between. A path works anywhere `latest` does.
+The first `latest` is the newest report, the second is the newest
+`*-projections*.csv` in your Downloads. A path works anywhere `latest` does.
+If the two do not correspond, `flag` says so rather than ranking the handful
+of names that happened to overlap.
+
+Or double-click **`OOTP-Scout.bat`**, which walks through all of the above.
 
 HTML, TSV and CSV are all accepted wherever a report is expected, so if you
 prefer to select the table in the browser and copy it yourself, paste it into a
@@ -67,13 +71,25 @@ View: Batting Ratings   Grade column: OVR   Matched: 41 of 41 players
   3  Player 03                SS    19    50   2.70   0.49  +2.21  1.17  Normal
 ```
 
-Name the output `.xlsx` and you get a formatted spreadsheet instead of a CSV:
-frozen header, autofilter, and rows tinted by how large the differential is —
-**green** at z ≥ 2.0, **amber** at z ≥ 1.0. A second sheet records the fitted
-line, the position offsets and the highlight thresholds, so the numbers can be
-argued with rather than just trusted. `--highlight-z` moves the green
-threshold. Writing `.xlsx` needs `openpyxl`; a `.csv` name stays
-dependency-free.
+Name the output `.xlsx` and you get a formatted spreadsheet instead of a CSV.
+It holds **every player in the pool**, best differential first, with each
+player's tool ratings alongside the analysis columns — so it doubles as a
+scouting sheet you can filter and sort. Rows are tinted in both directions:
+
+| Colour | Meaning |
+| --- | --- |
+| Green | Underrated, z ≥ 2.0 |
+| Amber | Underrated, z ≥ 1.0 |
+| Peach | Overrated, z ≤ −1.0 |
+| Red | Overrated, z ≤ −2.0 |
+| None | Within a standard deviation — grade and projection agree |
+
+`--limit` only trims the tables printed to the terminal; the sheet always keeps
+everyone, because the uncoloured middle is what makes the highlighted extremes
+legible. `--highlight-z` moves the strong threshold. A second sheet records the
+fitted line, the position offsets and the thresholds, so the numbers can be
+argued with rather than just trusted. Writing `.xlsx` needs `openpyxl`; a `.csv`
+name stays dependency-free.
 
 ## rWAR, for pitchers
 
@@ -100,11 +116,11 @@ unaffected.
 
 ## Both ends of the ranking
 
-Both ends of the ranking are reported. **Most underrated** are the players to
+Both ends of the ranking are printed. **Most underrated** are the players to
 target; **most overrated** are the same fit read downwards — players projecting
 below what their grade implies, which is who to trade away or stop paying up
-for. In the spreadsheet they get their own sheet, tinted red rather than green.
-`--overrated N` sets how many (default 10; `0` turns it off).
+for. `--overrated N` sets how many appear in the terminal (default 10; `0`
+turns it off). The spreadsheet shows both ends by colour on one sheet.
 
 Useful flags on `flag`: `--limit`, `--min-z 1.5`, `--degree 2` (fit a curve),
 `--pool` (fit hitters and pitchers together), `--no-position`.
@@ -132,13 +148,14 @@ names the view you want instead.
 
 ### Rating scales
 
-Pass `--scale` to match whatever OOTP is set to; it defaults to `20 to 80`.
-Whatever you choose here must match the RATINGS SCALE dropdown on the site.
+The scale is detected from the ratings themselves and printed — match the
+site's RATINGS SCALE dropdown to what it says. `--scale` overrides it.
 
-On the 20-80 scale the calculator rejects any rating that is not a multiple of
-5. OOTP's own 20-80 display works in fives, so a real export should pass, but
-`prepare` checks before you paste and names the player and column at fault
-rather than letting the site reject the whole batch with a generic message.
+The tell is arithmetic: OOTP's 20-80 display rounds to the nearest grade, so
+every rating lands on a multiple of 5, while a 1-100 export produces off-grid
+values almost immediately. Note that OOTP shows some ratings above the nominal
+top of the 20-80 scale — a 90 Stealing turns up in real exports — so the
+detector allows up to 95, matching the calculator's own limit.
 
 If you have a choice, 1-100 carries more resolution than 20-80 and makes the
 residual ranking finer — a 20-80 pool puts many players on identical grades,
@@ -196,6 +213,7 @@ visible as one and you can discount it yourself.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-55 tests. `tests/fixtures/` holds a 41-player export and the projections
-ootpcalculator.com actually returned for it, including a planted player whose
-tools are elite and whose OVR is 35 — he must come out first.
+154 tests. `tests/fixtures/` holds a 41-player batting export and a 31-player
+pitching export, each with the projections ootpcalculator.com actually returned
+for them. Both pools contain a planted player whose tools are elite and whose
+OVR is 35 — he must come out first.

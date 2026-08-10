@@ -225,7 +225,9 @@ def command_flag(args: argparse.Namespace) -> int:
         subjects.append(flagging.Subject(
             name=row.name, position=row.position, grade=row.grade,
             war=projection.war, is_pitcher=row.is_pitcher, meta=row.meta,
-            rwar=rwar_by_name.get(row.name.strip().lower())))
+            rwar=rwar_by_name.get(row.name.strip().lower()),
+            ratings={column: row.values.get(column, "")
+                     for column in view.rating_columns}))
 
     # A fit needs a pool. Matching a handful of names usually means the report
     # and the projections came from two different exports, and fitting a line
@@ -292,10 +294,14 @@ def command_flag(args: argparse.Namespace) -> int:
     if args.out:
         if args.out.lower().endswith((".xlsx", ".xlsm")):
             try:
-                spreadsheet.write_xlsx(args.out, findings, analysis.fits,
+                # The spreadsheet gets the whole pool regardless of --limit:
+                # the middle of the distribution is what makes the highlighted
+                # extremes legible.
+                spreadsheet.write_xlsx(args.out, analysis.findings,
+                                       analysis.fits,
                                        grade_label=view.grade_column,
                                        strong_z=args.highlight_z,
-                                       overrated=overrated)
+                                       rating_columns=list(view.rating_columns))
             except spreadsheet.SpreadsheetUnavailable as error:
                 print(f"error: {error}", file=sys.stderr)
                 return 1
@@ -303,11 +309,13 @@ def command_flag(args: argparse.Namespace) -> int:
                 print(f"error writing {args.out}: {error}. If it is open in "
                       "Excel, close it and run again.", file=sys.stderr)
                 return 1
-            strong = sum(1 for f in findings if f.z_score >= args.highlight_z)
-            sheets = "Targets" + (" and Overrated" if overrated else "")
-            print(f"\nWrote {len(findings)} rows to {args.out} "
-                  f"({strong} highlighted at z >= {args.highlight_z}; "
-                  f"sheets: {sheets})")
+            up = sum(1 for f in analysis.findings
+                     if f.z_score >= args.highlight_z)
+            down = sum(1 for f in analysis.findings
+                       if f.z_score <= -args.highlight_z)
+            print(f"\nWrote all {len(analysis.findings)} players to {args.out} "
+                  f"({up} underrated, {down} overrated at |z| >= "
+                  f"{args.highlight_z})")
         else:
             _write_csv(args.out, findings)
             print(f"\nWrote {len(findings)} rows to {args.out}")

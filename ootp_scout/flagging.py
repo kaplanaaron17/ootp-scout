@@ -49,6 +49,8 @@ class Subject:
     meta: dict[str, str] = field(default_factory=dict)
     # Runs-allowed WAR, for pitchers whose projection carried IP and R.
     rwar: float | None = None
+    # The player's raw tool ratings, keyed by the export's own column names.
+    ratings: dict[str, str] = field(default_factory=dict)
 
     @property
     def war_gap(self) -> float | None:

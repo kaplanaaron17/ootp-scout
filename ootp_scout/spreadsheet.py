@@ -38,19 +38,22 @@ def _require_openpyxl():
     return openpyxl
 
 
-def _write_findings_sheet(sheet, findings: list[Finding], grade_label: str,
-                          strong_z: float, notable_z: float,
-                          overrated: bool) -> None:
-    """One table of players. `overrated` flips the direction and the colours."""
+def _write_players_sheet(sheet, findings: list[Finding], grade_label: str,
+                         strong_z: float, notable_z: float,
+                         rating_columns: list[str]) -> None:
+    """Every player in the pool, best differential first, tinted both ways.
+
+    One table rather than two: splitting underrated and overrated onto separate
+    sheets hid the middle of the distribution entirely, and the middle is what
+    makes the extremes legible.
+    """
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    if overrated:
-        strong_fill = PatternFill("solid", fgColor="FFFFC7CE")   # red
-        notable_fill = PatternFill("solid", fgColor="FFFCE4D6")  # peach
-    else:
-        strong_fill = PatternFill("solid", fgColor="FFC7EFCE")   # green
-        notable_fill = PatternFill("solid", fgColor="FFFFF2CC")  # amber
+    strong_up = PatternFill("solid", fgColor="FFC7EFCE")     # green
+    notable_up = PatternFill("solid", fgColor="FFFFF2CC")    # amber
+    strong_down = PatternFill("solid", fgColor="FFFFC7CE")   # red
+    notable_down = PatternFill("solid", fgColor="FFFCE4D6")  # peach
     header_fill = PatternFill("solid", fgColor="FF1F3864")
     header_font = Font(bold=True, color="FFFFFFFF")
     bold = Font(bold=True)
@@ -61,6 +64,8 @@ def _write_findings_sheet(sheet, findings: list[Finding], grade_label: str,
     columns = list(COLUMNS)
     if show_rwar:
         columns[7:7] = PITCHER_COLUMNS
+    analysis_width = len(columns)
+    columns += [(name, max(7, len(name) + 2)) for name in rating_columns]
 
     headers = [name for name, _width in columns]
     headers[5] = grade_label
@@ -100,16 +105,24 @@ def _write_findings_sheet(sheet, findings: list[Finding], grade_label: str,
             round(finding.z_score, 2),
             finding.scouting_accuracy,
         ]
+        for column in rating_columns:
+            raw = subject.ratings.get(column, "")
+            try:
+                values.append(float(raw) if raw not in ("", "-") else raw)
+            except (TypeError, ValueError):
+                values.append(raw)
         sheet.append(values)
 
         row = sheet.max_row
-        # Overrated players are ranked by how far *below* the line they sit,
-        # so the same thresholds apply to the magnitude of a negative z.
-        strength = -finding.z_score if overrated else finding.z_score
-        if strength >= strong_z:
-            fill = strong_fill
-        elif strength >= notable_z:
-            fill = notable_fill
+        z = finding.z_score
+        if z >= strong_z:
+            fill = strong_up
+        elif z >= notable_z:
+            fill = notable_up
+        elif z <= -strong_z:
+            fill = strong_down
+        elif z <= -notable_z:
+            fill = notable_down
         else:
             fill = None
         for column in range(1, len(columns) + 1):
@@ -118,30 +131,27 @@ def _write_findings_sheet(sheet, findings: list[Finding], grade_label: str,
                 cell.fill = fill
             if column in numeric_columns:
                 cell.number_format = "0.00"
-            if column == differential_column and strength >= strong_z:
+            if column == differential_column and abs(z) >= strong_z:
                 cell.font = bold
 
-    sheet.freeze_panes = "A2"
+    sheet.freeze_panes = "C2"
     if findings:
         sheet.auto_filter.ref = (f"A1:{get_column_letter(len(columns))}"
                                  f"{sheet.max_row}")
+    return analysis_width
 
 
 def write_xlsx(path: str, findings: list[Finding], fits: list[GroupFit],
                grade_label: str = "OVR", strong_z: float = STRONG_Z,
                notable_z: float = NOTABLE_Z,
-               overrated: list[Finding] | None = None) -> None:
+               rating_columns: list[str] | None = None) -> None:
     openpyxl = _require_openpyxl()
 
     workbook = openpyxl.Workbook()
     sheet = workbook.active
-    sheet.title = "Targets"
-    _write_findings_sheet(sheet, findings, grade_label, strong_z, notable_z,
-                          overrated=False)
-
-    if overrated:
-        _write_findings_sheet(workbook.create_sheet("Overrated"), overrated,
-                              grade_label, strong_z, notable_z, overrated=True)
+    sheet.title = "Players"
+    _write_players_sheet(sheet, findings, grade_label, strong_z, notable_z,
+                         list(rating_columns or []))
 
     _write_method_sheet(workbook, fits, grade_label, strong_z, notable_z,
                         len(findings))
@@ -170,10 +180,14 @@ def _write_method_sheet(workbook, fits: list[GroupFit], grade_label: str,
     row("What this measures",
         "How far a player's projected WAR sits above the WAR his grade "
         "predicts - not raw WAR.")
-    row("Targets sheet", "Grade underrates the player. Green: z >= "
+    row("Players sheet", "Every player in the pool, best differential first, "
+                         "with his ratings alongside.")
+    row("Green / amber", f"Underrated - projects above his grade. Green: z >= "
                          f"{strong_z}. Amber: z >= {notable_z}.")
-    row("Overrated sheet", "Grade flatters the player - he projects below "
-                           "what it implies. Same thresholds, negative.")
+    row("Red / peach", f"Overrated - projects below his grade. Red: z <= "
+                       f"-{strong_z}. Peach: z <= -{notable_z}.")
+    row("Uncoloured", "Within one standard deviation of the line - the grade "
+                      "and the projection broadly agree.")
     row("Players listed", player_count)
     row("Caution", "Scouting accuracy is reported, never filtered on. A large "
                    "differential on a Low-accuracy report is a guess about a guess.")
