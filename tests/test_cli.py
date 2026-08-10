@@ -89,6 +89,52 @@ class FlagCommandTest(unittest.TestCase):
         self.assertIn("scouting_accuracy", content.splitlines()[0])
         self.assertIn("Sleeper Sam", content)
 
+    def test_xlsx_out_writes_a_real_spreadsheet(self):
+        """--out foo.xlsx must produce a workbook, not CSV text renamed.
+
+        An earlier version wrote CSV to the .xlsx path. Excel then refused to
+        open it, and nothing caught it because the spreadsheet tests called
+        write_xlsx directly and never went through the CLI.
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "targets.xlsx")
+            code, out, _ = run(["flag", REPORT, PROJECTIONS, "--limit", "5",
+                                "--out", destination])
+            self.assertEqual(code, 0)
+            with open(destination, "rb") as handle:
+                magic = handle.read(4)
+        # Every .xlsx is a zip archive.
+        self.assertEqual(magic, b"PK\x03\x04")
+        self.assertIn("highlighted", out)
+
+    def test_xlsx_out_is_readable_as_a_workbook(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "targets.xlsx")
+            run(["flag", REPORT, PROJECTIONS, "--limit", "5",
+                 "--out", destination])
+            book = openpyxl.load_workbook(destination)
+            try:
+                self.assertIn("Targets", book.sheetnames)
+                self.assertIn("How this was calculated", book.sheetnames)
+                sheet = book["Targets"]
+                self.assertEqual(sheet.max_row, 6)  # header plus 5 players
+                self.assertEqual(sheet.cell(row=1, column=6).value, "OVR")
+            finally:
+                book.close()
+
+    def test_csv_out_still_writes_csv(self):
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "targets.csv")
+            run(["flag", REPORT, PROJECTIONS, "--limit", "3",
+                 "--out", destination])
+            with open(destination, encoding="utf-8") as handle:
+                first = handle.readline()
+        self.assertTrue(first.startswith("rank,name,position"))
+
     def test_mismatched_projections_file_fails_clearly(self):
         code, _, err = run(["flag", REPORT, REPORT])
         self.assertEqual(code, 1)

@@ -274,8 +274,24 @@ def command_flag(args: argparse.Namespace) -> int:
         print(f"  line {line_number}: {detail}", file=sys.stderr)
 
     if args.out:
-        _write_csv(args.out, findings)
-        print(f"\nWrote {len(findings)} rows to {args.out}")
+        if args.out.lower().endswith((".xlsx", ".xlsm")):
+            try:
+                spreadsheet.write_xlsx(args.out, findings, analysis.fits,
+                                       grade_label=view.grade_column,
+                                       strong_z=args.highlight_z)
+            except spreadsheet.SpreadsheetUnavailable as error:
+                print(f"error: {error}", file=sys.stderr)
+                return 1
+            except OSError as error:
+                print(f"error writing {args.out}: {error}. If it is open in "
+                      "Excel, close it and run again.", file=sys.stderr)
+                return 1
+            strong = sum(1 for f in findings if f.z_score >= args.highlight_z)
+            print(f"\nWrote {len(findings)} rows to {args.out} "
+                  f"({strong} highlighted at z >= {args.highlight_z})")
+        else:
+            _write_csv(args.out, findings)
+            print(f"\nWrote {len(findings)} rows to {args.out}")
     return 0
 
 
