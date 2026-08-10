@@ -75,6 +75,12 @@ argued with rather than just trusted. `--highlight-z` moves the green
 threshold. Writing `.xlsx` needs `openpyxl`; a `.csv` name stays
 dependency-free.
 
+Both ends of the ranking are reported. **Most underrated** are the players to
+target; **most overrated** are the same fit read downwards — players projecting
+below what their grade implies, which is who to trade away or stop paying up
+for. In the spreadsheet they get their own sheet, tinted red rather than green.
+`--overrated N` sets how many (default 10; `0` turns it off).
+
 Useful flags on `flag`: `--limit`, `--min-z 1.5`, `--degree 2` (fit a curve),
 `--pool` (fit hitters and pitchers together), `--no-position`.
 

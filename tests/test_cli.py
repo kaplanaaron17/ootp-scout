@@ -72,7 +72,9 @@ class FlagCommandTest(unittest.TestCase):
             self.assertNotIn(absent, out)
 
     def test_min_z_filters(self):
-        _, out, _ = run(["flag", REPORT, PROJECTIONS, "--min-z", "3"])
+        """--min-z applies to the underrated list, not the overrated one."""
+        _, out, _ = run(["flag", REPORT, PROJECTIONS, "--min-z", "3",
+                         "--overrated", "0"])
         rows = [line for line in out.splitlines()
                 if line.strip() and line.strip()[0].isdigit()]
         self.assertEqual(len(rows), 1)
@@ -88,6 +90,59 @@ class FlagCommandTest(unittest.TestCase):
                 content = handle.read()
         self.assertIn("scouting_accuracy", content.splitlines()[0])
         self.assertIn("Sleeper Sam", content)
+
+    def test_overrated_leaderboard_is_printed(self):
+        _, out, _ = run(["flag", REPORT, PROJECTIONS, "--limit", "3",
+                         "--overrated", "3"])
+        self.assertIn("MOST UNDERRATED", out)
+        self.assertIn("MOST OVERRATED", out)
+        overrated_block = out.split("MOST OVERRATED")[1]
+        rows = [line for line in overrated_block.splitlines()
+                if line.strip() and line.strip()[0].isdigit()]
+        self.assertEqual(len(rows), 3)
+        # The worst shortfall leads, so the differential column is negative.
+        self.assertIn("-", rows[0].split()[-3])
+
+    def test_overrated_zero_turns_it_off(self):
+        _, out, _ = run(["flag", REPORT, PROJECTIONS, "--overrated", "0"])
+        self.assertNotIn("MOST OVERRATED", out)
+
+    def test_overrated_gets_its_own_sheet(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "targets.xlsx")
+            run(["flag", REPORT, PROJECTIONS, "--limit", "4", "--overrated", "4",
+                 "--out", destination])
+            book = openpyxl.load_workbook(destination)
+            try:
+                self.assertIn("Overrated", book.sheetnames)
+                sheet = book["Overrated"]
+                self.assertEqual(sheet.max_row, 5)
+                worst = sheet.cell(row=2, column=9).value
+                self.assertLess(worst, 0)
+                # Strong negatives are tinted red, not green.
+                self.assertEqual(sheet.cell(row=2, column=2).fill.fgColor.rgb,
+                                 "FFFFC7CE")
+            finally:
+                book.close()
+
+    def test_no_overrated_sheet_when_disabled(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "targets.xlsx")
+            run(["flag", REPORT, PROJECTIONS, "--overrated", "0",
+                 "--out", destination])
+            book = openpyxl.load_workbook(destination)
+            try:
+                self.assertNotIn("Overrated", book.sheetnames)
+            finally:
+                book.close()
 
     def test_xlsx_out_writes_a_real_spreadsheet(self):
         """--out foo.xlsx must produce a workbook, not CSV text renamed.

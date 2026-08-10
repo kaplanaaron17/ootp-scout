@@ -35,22 +35,22 @@ def _require_openpyxl():
     return openpyxl
 
 
-def write_xlsx(path: str, findings: list[Finding], fits: list[GroupFit],
-               grade_label: str = "OVR", strong_z: float = STRONG_Z,
-               notable_z: float = NOTABLE_Z) -> None:
-    openpyxl = _require_openpyxl()
+def _write_findings_sheet(sheet, findings: list[Finding], grade_label: str,
+                          strong_z: float, notable_z: float,
+                          overrated: bool) -> None:
+    """One table of players. `overrated` flips the direction and the colours."""
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    strong_fill = PatternFill("solid", fgColor="FFC7EFCE")   # green
-    notable_fill = PatternFill("solid", fgColor="FFFFF2CC")  # amber
+    if overrated:
+        strong_fill = PatternFill("solid", fgColor="FFFFC7CE")   # red
+        notable_fill = PatternFill("solid", fgColor="FFFCE4D6")  # peach
+    else:
+        strong_fill = PatternFill("solid", fgColor="FFC7EFCE")   # green
+        notable_fill = PatternFill("solid", fgColor="FFFFF2CC")  # amber
     header_fill = PatternFill("solid", fgColor="FF1F3864")
     header_font = Font(bold=True, color="FFFFFFFF")
     bold = Font(bold=True)
-
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    sheet.title = "Targets"
 
     headers = [name for name, _width in COLUMNS]
     headers[5] = grade_label
@@ -79,9 +79,12 @@ def write_xlsx(path: str, findings: list[Finding], fits: list[GroupFit],
             finding.scouting_accuracy,
         ])
         row = sheet.max_row
-        if finding.z_score >= strong_z:
+        # Overrated players are ranked by how far *below* the line they sit,
+        # so the same thresholds apply to the magnitude of a negative z.
+        strength = -finding.z_score if overrated else finding.z_score
+        if strength >= strong_z:
             fill = strong_fill
-        elif finding.z_score >= notable_z:
+        elif strength >= notable_z:
             fill = notable_fill
         else:
             fill = None
@@ -91,13 +94,30 @@ def write_xlsx(path: str, findings: list[Finding], fits: list[GroupFit],
                 cell.fill = fill
             if column in (7, 8, 9, 10):
                 cell.number_format = "0.00"
-            if column == 9 and finding.z_score >= strong_z:
+            if column == 9 and strength >= strong_z:
                 cell.font = bold
 
     sheet.freeze_panes = "A2"
     if findings:
         sheet.auto_filter.ref = (f"A1:{get_column_letter(len(COLUMNS))}"
                                  f"{sheet.max_row}")
+
+
+def write_xlsx(path: str, findings: list[Finding], fits: list[GroupFit],
+               grade_label: str = "OVR", strong_z: float = STRONG_Z,
+               notable_z: float = NOTABLE_Z,
+               overrated: list[Finding] | None = None) -> None:
+    openpyxl = _require_openpyxl()
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Targets"
+    _write_findings_sheet(sheet, findings, grade_label, strong_z, notable_z,
+                          overrated=False)
+
+    if overrated:
+        _write_findings_sheet(workbook.create_sheet("Overrated"), overrated,
+                              grade_label, strong_z, notable_z, overrated=True)
 
     _write_method_sheet(workbook, fits, grade_label, strong_z, notable_z,
                         len(findings))
@@ -126,9 +146,11 @@ def _write_method_sheet(workbook, fits: list[GroupFit], grade_label: str,
     row("What this measures",
         "How far a player's projected WAR sits above the WAR his grade "
         "predicts - not raw WAR.")
+    row("Targets sheet", "Grade underrates the player. Green: z >= "
+                         f"{strong_z}. Amber: z >= {notable_z}.")
+    row("Overrated sheet", "Grade flatters the player - he projects below "
+                           "what it implies. Same thresholds, negative.")
     row("Players listed", player_count)
-    row("Highlighting", f"Green: z >= {strong_z}. Amber: z >= {notable_z}. "
-                        "z is the differential in standard deviations.")
     row("Caution", "Scouting accuracy is reported, never filtered on. A large "
                    "differential on a Low-accuracy report is a guess about a guess.")
     sheet.append([])

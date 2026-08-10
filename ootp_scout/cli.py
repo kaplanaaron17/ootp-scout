@@ -82,6 +82,10 @@ def build_parser() -> argparse.ArgumentParser:
                       action="store_false",
                       help="do not give each position its own baseline")
     flag.set_defaults(position_adjust=True)
+    flag.add_argument("--overrated", type=int, default=10, metavar="N",
+                      help="also list the N most overrated players - those "
+                           "projecting furthest below their grade (default: "
+                           "10; 0 turns it off)")
     flag.add_argument("--highlight-z", type=float, default=spreadsheet.STRONG_Z,
                       help="differential (in standard deviations) that counts "
                            "as a strong flag in the spreadsheet "
@@ -262,7 +266,16 @@ def command_flag(args: argparse.Namespace) -> int:
     if not findings:
         print("No player cleared the threshold.")
     else:
+        print("MOST UNDERRATED - projecting above what their grade implies")
         print(_format_table(findings, view.grade_column))
+
+    overrated: list[flagging.Finding] = []
+    if args.overrated > 0:
+        overrated = flagging.select_overrated(analysis.findings,
+                                              limit=args.overrated)
+        if overrated:
+            print("\nMOST OVERRATED - projecting below what their grade implies")
+            print(_format_table(overrated, view.grade_column))
 
     for label, names in (("unmatched by name", unmatched),
                          (f"no {view.grade_column} value", ungraded),
@@ -278,7 +291,8 @@ def command_flag(args: argparse.Namespace) -> int:
             try:
                 spreadsheet.write_xlsx(args.out, findings, analysis.fits,
                                        grade_label=view.grade_column,
-                                       strong_z=args.highlight_z)
+                                       strong_z=args.highlight_z,
+                                       overrated=overrated)
             except spreadsheet.SpreadsheetUnavailable as error:
                 print(f"error: {error}", file=sys.stderr)
                 return 1
@@ -287,8 +301,10 @@ def command_flag(args: argparse.Namespace) -> int:
                       "Excel, close it and run again.", file=sys.stderr)
                 return 1
             strong = sum(1 for f in findings if f.z_score >= args.highlight_z)
+            sheets = "Targets" + (" and Overrated" if overrated else "")
             print(f"\nWrote {len(findings)} rows to {args.out} "
-                  f"({strong} highlighted at z >= {args.highlight_z})")
+                  f"({strong} highlighted at z >= {args.highlight_z}; "
+                  f"sheets: {sheets})")
         else:
             _write_csv(args.out, findings)
             print(f"\nWrote {len(findings)} rows to {args.out}")

@@ -129,6 +129,46 @@ class AnalyzeTest(unittest.TestCase):
         self.assertGreater(cheap.residual, expensive.residual)
 
 
+class SelectOverratedTest(unittest.TestCase):
+    def _pool(self):
+        pool = [subject(f"On Line {grade}", float(grade), 0.1 * grade)
+                for grade in range(40, 76, 4)]
+        pool.append(subject("Sleeper", 45.0, 0.1 * 45 + 3.0))
+        pool.append(subject("Bust", 70.0, 0.1 * 70 - 4.0))
+        return pool
+
+    def test_worst_shortfall_comes_first(self):
+        analysis = flagging.analyze(self._pool(), position_adjust=False)
+        overrated = flagging.select_overrated(analysis.findings)
+        self.assertEqual(overrated[0].subject.name, "Bust")
+        self.assertLess(overrated[0].residual, 0)
+
+    def test_it_is_the_opposite_end_of_the_same_ranking(self):
+        analysis = flagging.analyze(self._pool(), position_adjust=False)
+        best = flagging.select(analysis.findings, limit=1)[0]
+        worst = flagging.select_overrated(analysis.findings, limit=1)[0]
+        self.assertEqual(best.subject.name, "Sleeper")
+        self.assertEqual(worst.subject.name, "Bust")
+        self.assertGreater(best.residual, worst.residual)
+
+    def test_limit(self):
+        analysis = flagging.analyze(self._pool(), position_adjust=False)
+        self.assertEqual(len(flagging.select_overrated(analysis.findings,
+                                                       limit=3)), 3)
+
+    def test_max_z_filters_to_the_genuinely_overrated(self):
+        analysis = flagging.analyze(self._pool(), position_adjust=False)
+        chosen = flagging.select_overrated(analysis.findings, max_z=-1.0)
+        self.assertTrue(all(f.z_score <= -1.0 for f in chosen))
+        self.assertIn("Bust", [f.subject.name for f in chosen])
+
+    def test_does_not_disturb_the_original_ordering(self):
+        analysis = flagging.analyze(self._pool(), position_adjust=False)
+        before = [f.subject.name for f in analysis.findings]
+        flagging.select_overrated(analysis.findings)
+        self.assertEqual([f.subject.name for f in analysis.findings], before)
+
+
 class SelectTest(unittest.TestCase):
     def _findings(self):
         return [flagging.Finding(subject=subject(f"P{index}", 50.0, 1.0),

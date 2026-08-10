@@ -255,3 +255,19 @@ def select(findings: list[Finding], limit: int | None = None,
     if limit is not None:
         chosen = chosen[:limit]
     return chosen
+
+
+def select_overrated(findings: list[Finding], limit: int | None = None,
+                     max_z: float | None = None) -> list[Finding]:
+    """The other end of the same list: worst shortfall first.
+
+    A player here projects well below what his grade implies - the grade is
+    flattering him. Useful in the opposite direction from the targets list:
+    these are the ones to trade away, or to stop paying up for.
+    """
+    chosen = sorted(findings, key=lambda f: f.residual)
+    if max_z is not None:
+        chosen = [f for f in chosen if f.z_score <= max_z]
+    if limit is not None:
+        chosen = chosen[:limit]
+    return chosen
