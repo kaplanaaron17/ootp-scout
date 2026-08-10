@@ -47,9 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
                          help="use the most recent report OOTP wrote to disk")
     prepare.add_argument("--out", help="write the paste block here "
                                        "(default: alongside the report)")
-    prepare.add_argument("--scale", default="20 to 80", choices=views.SCALES,
-                         help="the rating scale your export uses "
-                              "(default: 20 to 80)")
+    prepare.add_argument("--scale", default="auto",
+                         choices=("auto",) + views.SCALES,
+                         help="the rating scale your export uses. The default "
+                              "works it out from the ratings themselves and "
+                              "tells you which to pick on the site.")
     prepare.add_argument("--no-copy", dest="copy", action="store_false",
                          help="do not put the paste block on the clipboard")
     prepare.set_defaults(copy=True)
@@ -121,15 +123,25 @@ def command_prepare(args: argparse.Namespace) -> int:
     print(f"Detected the {view.ootp_view_name} view "
           f"({view.role}, {view.mode}) - {len(rows)} players.")
 
-    complaints = views.validate_ratings(rows, view, args.scale)
+    scale = args.scale
+    if scale == "auto":
+        detected, reason = views.infer_scale(rows, view)
+        if detected is None:
+            print(f"error: could not work out the rating scale - {reason}. "
+                  "Pass --scale explicitly.", file=sys.stderr)
+            return 1
+        scale = detected
+        print(f"Rating scale: {scale} ({reason})")
+
+    complaints = views.validate_ratings(rows, view, scale)
     if complaints:
         print(f"\n{len(complaints)} value(s) the calculator will reject on the "
-              f"{args.scale} scale:", file=sys.stderr)
+              f"{scale} scale:", file=sys.stderr)
         for name, detail in complaints[:15]:
             print(f"  {name}: {detail}", file=sys.stderr)
         if len(complaints) > 15:
             print(f"  ... and {len(complaints) - 15} more", file=sys.stderr)
-        if args.scale == views.SCALE_STEP_5:
+        if scale == views.SCALE_STEP_5:
             print("\nThe 20-80 scale only accepts multiples of 5, so this export "
                   "is almost certainly not on that scale. If OOTP is set to "
                   "1-100, re-run with --scale \"1 to 100\" and set the site's "
@@ -161,7 +173,7 @@ def command_prepare(args: argparse.Namespace) -> int:
     print(f"\nWrote {len(out_rows)} rows to {destination}\n")
     print("Next:")
     print(f"  1. Open {url}")
-    print(f"  2. Set RATINGS SCALE to '{args.scale}', then click BATCH INPUT")
+    print(f"  2. Set RATINGS SCALE to '{scale}', then click BATCH INPUT")
     if copied:
         print("  3. Press Ctrl+V - the paste block is already on your "
               "clipboard - then click SUBMIT")

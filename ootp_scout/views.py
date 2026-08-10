@@ -191,6 +191,56 @@ def parse_rows(headers: list[str], rows: list[list[str]], view: View
     return parsed, problems
 
 
+SCALE_1_100 = "1 to 100"
+
+# OOTP shows some ratings above the nominal top of the 20-80 scale - a 90
+# Stealing turns up in real exports. The calculator normalizes a rating to
+# 200*(value-low)/(high-low) and rejects beyond 250, which on 20-80 permits
+# values up to 95. Matching its ceiling rather than the nominal 80 keeps a
+# single fast baserunner from being read as a different scale entirely.
+SCALE_STEP_5_CEILING = 95.0
+
+
+def rating_values(rows: list[ExportRow], view: View) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        for column in view.rating_columns:
+            value = _to_float(row.values.get(column, ""))
+            if value is not None:
+                values.append(value)
+    return values
+
+
+def infer_scale(rows: list[ExportRow], view: View) -> tuple[str | None, str]:
+    """Work out which rating scale an export is on.
+
+    Returns (scale, reason). Only the two scales worth using are detected;
+    anything else returns None so the caller can ask rather than guess.
+
+    The tell is arithmetic: OOTP's 20-80 display rounds to the nearest grade,
+    so every value lands on a multiple of 5. A 1-100 export will contain values
+    that do not, almost immediately.
+    """
+    values = rating_values(rows, view)
+    if not values:
+        return None, "no rating values found"
+
+    low, high = min(values), max(values)
+    if high > 100 or low < 0:
+        return None, f"values span {low:g}-{high:g}, which matches no OOTP scale"
+
+    off_grid = [v for v in values if v % 5 != 0]
+    if not off_grid and low >= 20 and high <= SCALE_STEP_5_CEILING:
+        note = "" if high <= 80 else f" (top rating {high:g})"
+        return SCALE_STEP_5, (f"every rating is a multiple of 5, from {low:g} "
+                              f"up{note} - {len(values)} values checked")
+    if high <= 100:
+        share = len(off_grid) / len(values)
+        return SCALE_1_100, (f"{share:.0%} of ratings are not multiples of 5, "
+                             f"so this is not a 20-80 export")
+    return None, "could not tell"
+
+
 def validate_ratings(rows: list[ExportRow], view: View, scale: str
                      ) -> list[tuple[str, str]]:
     """Pre-check the rules the calculator enforces, so failures are legible.

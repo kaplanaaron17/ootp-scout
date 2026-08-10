@@ -1,9 +1,10 @@
 @echo off
 REM Double-click this to run the whole workflow. No terminal typing.
 REM
-REM Change SCALE below if you switch OOTP's rating scale.
+REM The rating scale is detected from the export, so this works whether OOTP
+REM is set to 20-80 or 1-100. The scale it found is printed below - match the
+REM site's RATINGS SCALE dropdown to it.
 setlocal
-set "SCALE=1 to 100"
 
 cd /d "%~dp0"
 title OOTP Scout
@@ -20,7 +21,7 @@ echo.
 pause
 echo.
 
-python -m ootp_scout prepare --latest --scale "%SCALE%"
+python -m ootp_scout prepare --latest
 if errorlevel 1 goto failed
 
 echo.
@@ -28,7 +29,7 @@ echo ================================================================
 echo  The ratings are on your clipboard. Now, in your browser:
 echo.
 echo    1. Open the projections page (link printed above)
-echo    2. Set RATINGS SCALE to "%SCALE%"
+echo    2. Set RATINGS SCALE to the scale printed above
 echo    3. Click BATCH INPUT, press Ctrl+V, click SUBMIT
 echo    4. Click DOWNLOAD CSV
 echo ================================================================

@@ -126,6 +126,71 @@ class ParseRowsTest(unittest.TestCase):
         self.assertEqual(rows[0].scouting_accuracy, "unknown")
 
 
+class InferScaleTest(unittest.TestCase):
+    def setUp(self):
+        self.view = views.identify_view(BATTER_CURRENT)
+
+    def _rows(self, *value_sets):
+        raw = []
+        for values in value_sets:
+            overrides = {column: str(value) for column, value
+                         in zip(self.view.rating_columns, values)}
+            raw.append(row_for(BATTER_CURRENT, **overrides))
+        rows, _ = views.parse_rows(BATTER_CURRENT, raw, self.view)
+        return rows
+
+    def test_all_multiples_of_five_within_range_reads_as_20_80(self):
+        rows = self._rows([25] * 14, [50] * 14, [80] * 14)
+        scale, reason = views.infer_scale(rows, self.view)
+        self.assertEqual(scale, views.SCALE_STEP_5)
+        self.assertIn("multiple of 5", reason)
+
+    def test_one_off_grid_value_rules_out_20_80(self):
+        rows = self._rows([25] * 14, [50] * 13 + [52])
+        scale, _ = views.infer_scale(rows, self.view)
+        self.assertEqual(scale, views.SCALE_1_100)
+
+    def test_a_single_rating_above_80_does_not_flip_the_scale(self):
+        """OOTP really does show a 90 Stealing on the 20-80 scale.
+
+        Taken from a real export: 2,296 ratings, all multiples of 5, one STE
+        of 90. Reading that as 1-100 would send the user to the wrong dropdown.
+        """
+        rows = self._rows([50] * 14, [25] * 13 + [90])
+        scale, reason = views.infer_scale(rows, self.view)
+        self.assertEqual(scale, views.SCALE_STEP_5)
+        self.assertIn("90", reason)
+
+    def test_values_beyond_the_calculators_ceiling_read_as_1_100(self):
+        rows = self._rows([100] * 14, [45] * 14)
+        scale, _ = views.infer_scale(rows, self.view)
+        self.assertEqual(scale, views.SCALE_1_100)
+
+    def test_real_world_range_reads_as_1_100(self):
+        """36-73 as continuous integers is what a 1-100 save looks like."""
+        rows = self._rows(list(range(36, 50)), list(range(51, 65)))
+        scale, reason = views.infer_scale(rows, self.view)
+        self.assertEqual(scale, views.SCALE_1_100)
+        self.assertIn("not multiples of 5", reason)
+
+    def test_out_of_range_values_are_refused_rather_than_guessed(self):
+        rows = self._rows([150] * 14)
+        scale, reason = views.infer_scale(rows, self.view)
+        self.assertIsNone(scale)
+        self.assertIn("matches no OOTP scale", reason)
+
+    def test_no_ratings_returns_none(self):
+        rows = self._rows()
+        scale, reason = views.infer_scale(rows, self.view)
+        self.assertIsNone(scale)
+        self.assertIn("no rating values", reason)
+
+    def test_detected_20_80_then_passes_validation(self):
+        rows = self._rows([25] * 14, [60] * 14)
+        scale, _ = views.infer_scale(rows, self.view)
+        self.assertEqual(views.validate_ratings(rows, self.view, scale), [])
+
+
 class ValidateRatingsTest(unittest.TestCase):
     def setUp(self):
         self.view = views.identify_view(BATTER_CURRENT)
