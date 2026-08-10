@@ -24,11 +24,11 @@ In OOTP: pick your player list, switch to one of the ratings views below, then
 browser — you can ignore the browser window). Then:
 
 ```bash
-.\capture.ps1 -Report "path\to\that\report.html"
+python -m ootp_scout prepare "path\to\that\report.html"
 ```
 
-This reads OOTP's HTML directly, checks it, and puts the paste block **on your
-clipboard**. Then:
+This reads OOTP's HTML directly, checks it against what the calculator accepts,
+and puts the paste block **on your clipboard**. Then:
 
 1. Open the [batter](https://ootpcalculator.com/batter-projections) or
    [pitcher](https://ootpcalculator.com/pitcher-projections) projections page
@@ -37,18 +37,16 @@ clipboard**. Then:
 4. Click **DOWNLOAD CSV**
 
 ```bash
-python -m ootp_scout flag report.html "$env:USERPROFILE\Downloads\batter-projections.csv" --out targets.csv
+python -m ootp_scout flag "path\to\that\report.html" "$env:USERPROFILE\Downloads\batter-projections.csv" --out targets.csv
 ```
 
-`capture.ps1` with no `-Report` reads the clipboard instead, for when you have
-selected the table in the browser and copied it yourself. Both paths end the
-same way. The Python commands work standalone too:
+HTML, TSV and CSV are all accepted wherever a report is expected, so if you
+prefer to select the table in the browser and copy it yourself, paste it into a
+`.tsv` and pass that instead. `--no-copy` skips the clipboard step.
 
-```bash
-python -m ootp_scout prepare report.html --scale "20 to 80"
-```
-
-HTML, TSV and CSV are all accepted wherever a report is expected.
+`capture.ps1` wraps the same thing and can read the clipboard as input, but
+Windows blocks `.ps1` files by default (`running scripts is disabled on this
+system`). The Python commands above need no such permission, so prefer them.
 
 Output:
 

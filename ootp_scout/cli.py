@@ -12,7 +12,7 @@ import argparse
 import csv
 import sys
 
-from . import flagging, projections, tables, views
+from . import clipboard, flagging, projections, tables, views
 
 BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
@@ -37,6 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--scale", default="20 to 80", choices=views.SCALES,
                          help="the rating scale your export uses "
                               "(default: 20 to 80)")
+    prepare.add_argument("--no-copy", dest="copy", action="store_false",
+                         help="do not put the paste block on the clipboard")
+    prepare.set_defaults(copy=True)
 
     flag = subparsers.add_parser(
         "flag", help="join a report with calculator projections and rank")
@@ -99,12 +102,26 @@ def command_prepare(args: argparse.Namespace) -> int:
     destination = args.out or f"{args.report.rsplit('.', 1)[0]}.paste.tsv"
     tables.write_tsv(destination, keep, out_rows)
 
+    copied = False
+    if args.copy:
+        block = "\t".join(keep) + "\n" + "".join(
+            "\t".join(row) + "\n" for row in out_rows)
+        try:
+            clipboard.copy(block)
+            copied = True
+        except clipboard.ClipboardError as error:
+            print(f"(could not copy to the clipboard: {error})", file=sys.stderr)
+
     url = BATTER_URL if view.role == views.BATTER else PITCHER_URL
     print(f"\nWrote {len(out_rows)} rows to {destination}\n")
     print("Next:")
     print(f"  1. Open {url}")
     print(f"  2. Set RATINGS SCALE to '{args.scale}', then click BATCH INPUT")
-    print(f"  3. Paste the whole contents of {destination}, click SUBMIT")
+    if copied:
+        print("  3. Press Ctrl+V - the paste block is already on your "
+              "clipboard - then click SUBMIT")
+    else:
+        print(f"  3. Paste the whole contents of {destination}, click SUBMIT")
     print("  4. Click DOWNLOAD CSV")
     print(f"  5. python -m ootp_scout flag {args.report} "
           f"{view.role}-projections.csv")

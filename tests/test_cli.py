@@ -14,9 +14,9 @@ import io
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
-from ootp_scout import cli
+from ootp_scout import clipboard, cli
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 REPORT = os.path.join(FIXTURES, "pool_batters.tsv")
@@ -28,6 +28,24 @@ def run(argv):
     with redirect_stdout(out), redirect_stderr(err):
         code = cli.main(argv)
     return code, out.getvalue(), err.getvalue()
+
+
+@contextmanager
+def captured_clipboard(fail_with=None):
+    """Intercept clipboard writes so tests never touch the real clipboard."""
+    recorded = []
+    original = cli.clipboard.copy
+
+    def fake(text):
+        if fail_with is not None:
+            raise fail_with
+        recorded.append(text)
+
+    cli.clipboard.copy = fake
+    try:
+        yield recorded
+    finally:
+        cli.clipboard.copy = original
 
 
 class FlagCommandTest(unittest.TestCase):
@@ -81,7 +99,8 @@ class PrepareCommandTest(unittest.TestCase):
     def test_detects_the_view_and_writes_a_paste_block(self):
         with tempfile.TemporaryDirectory() as folder:
             destination = os.path.join(folder, "paste.tsv")
-            code, out, _ = run(["prepare", REPORT, "--out", destination])
+            with captured_clipboard():
+                code, out, _ = run(["prepare", REPORT, "--out", destination])
             self.assertEqual(code, 0)
             with open(destination, encoding="utf-8") as handle:
                 lines = handle.read().splitlines()
@@ -89,6 +108,41 @@ class PrepareCommandTest(unittest.TestCase):
         self.assertIn("batter-projections", out)
         self.assertEqual(len(lines), 42)  # header plus 41 players
         self.assertTrue(lines[0].startswith("POS\t#\tName"))
+
+    def test_paste_block_goes_to_the_clipboard_by_default(self):
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "paste.tsv")
+            with captured_clipboard() as recorded:
+                _, out, _ = run(["prepare", REPORT, "--out", destination])
+        self.assertEqual(len(recorded), 1)
+        self.assertIn("Ctrl+V", out)
+        with open(REPORT, encoding="utf-8") as handle:
+            expected_players = len(handle.read().splitlines()) - 1
+        self.assertEqual(len(recorded[0].strip().splitlines()),
+                         expected_players + 1)
+        self.assertTrue(recorded[0].startswith("POS\t#\tName"))
+
+    def test_no_copy_leaves_the_clipboard_alone(self):
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "paste.tsv")
+            with captured_clipboard() as recorded:
+                _, out, _ = run(["prepare", REPORT, "--out", destination,
+                                 "--no-copy"])
+        self.assertEqual(recorded, [])
+        self.assertNotIn("Ctrl+V", out)
+        self.assertIn("Paste the whole contents", out)
+
+    def test_a_clipboard_failure_is_reported_but_not_fatal(self):
+        """A locked clipboard must not lose the run - the file is still there."""
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "paste.tsv")
+            failure = clipboard.ClipboardError("clipboard busy")
+            with captured_clipboard(fail_with=failure):
+                code, out, err = run(["prepare", REPORT, "--out", destination])
+            self.assertTrue(os.path.exists(destination))
+        self.assertEqual(code, 0)
+        self.assertIn("clipboard busy", err)
+        self.assertIn("Paste the whole contents", out)
 
     def test_rejects_values_the_calculator_would_reject(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -108,8 +162,9 @@ class PrepareCommandTest(unittest.TestCase):
     def test_same_values_pass_on_the_1_100_scale(self):
         with tempfile.TemporaryDirectory() as folder:
             destination = os.path.join(folder, "paste.tsv")
-            code, _, _ = run(["prepare", REPORT, "--scale", "1 to 100",
-                              "--out", destination])
+            with captured_clipboard():
+                code, _, _ = run(["prepare", REPORT, "--scale", "1 to 100",
+                                  "--out", destination])
         self.assertEqual(code, 0)
 
     def test_draft_pool_export_is_rejected_with_guidance(self):
