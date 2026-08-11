@@ -21,9 +21,9 @@ BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
 
 REPORT_FIELDS = [
-    "rank", "name", "position", "age", "group", "grade", "projected_war",
-    "rwar", "rwar_minus_war", "expected_war", "residual", "z_score",
-    "scouting_accuracy",
+    "rank", "name", "position", "age", "group", "grade", "implied_grade",
+    "grade_gap", "projected_war", "rwar", "rwar_minus_war", "expected_war",
+    "residual", "z_score", "scouting_accuracy",
 ]
 
 # Below this many matched players there is no pool to fit against.
@@ -339,8 +339,11 @@ def _format_table(findings: list[flagging.Finding], grade_label: str) -> str:
     # rWAR only exists for pitchers, so the columns appear only when some row
     # actually has one - a batter table stays as narrow as it was.
     show_rwar = any(f.subject.rwar is not None for f in findings)
-    header = (f"{'#':>3}  {'Player':<24} {'Pos':<4} {'Age':>3} {grade_label:>5} "
-              f"{'WAR':>6} ")
+    show_implied = any(f.implied_grade is not None for f in findings)
+    header = (f"{'#':>3}  {'Player':<24} {'Pos':<4} {'Age':>3} {grade_label:>5} ")
+    if show_implied:
+        header += f"{'Impl':>5} {'+/-':>5} "
+    header += f"{'WAR':>6} "
     if show_rwar:
         header += f"{'rWAR':>6} {'R-W':>6} "
     header += f"{'Exp':>6} {'Diff':>6} {'z':>5}  Scouting"
@@ -349,8 +352,13 @@ def _format_table(findings: list[flagging.Finding], grade_label: str) -> str:
     for rank, finding in enumerate(findings, start=1):
         subject = finding.subject
         row = (f"{rank:>3}  {subject.name[:24]:<24} {subject.position[:4]:<4} "
-               f"{subject.meta.get('age', ''):>3} {subject.grade:>5.0f} "
-               f"{subject.war:>6.2f} ")
+               f"{subject.meta.get('age', ''):>3} {subject.grade:>5.0f} ")
+        if show_implied:
+            if finding.implied_grade is None:
+                row += f"{'-':>5} {'-':>5} "
+            else:
+                row += f"{finding.implied_grade:>5.0f} {finding.grade_gap:>+5.0f} "
+        row += f"{subject.war:>6.2f} "
         if show_rwar:
             if subject.rwar is None:
                 row += f"{'-':>6} {'-':>6} "
@@ -375,6 +383,10 @@ def _write_csv(path: str, findings: list[flagging.Finding]) -> None:
                 "age": subject.meta.get("age", ""),
                 "group": finding.group,
                 "grade": f"{subject.grade:.0f}",
+                "implied_grade": ("" if finding.implied_grade is None
+                                  else f"{finding.implied_grade:.0f}"),
+                "grade_gap": ("" if finding.grade_gap is None
+                              else f"{finding.grade_gap:+.0f}"),
                 "projected_war": f"{subject.war:.2f}",
                 "rwar": "" if subject.rwar is None else f"{subject.rwar:.2f}",
                 "rwar_minus_war": ("" if subject.war_gap is None

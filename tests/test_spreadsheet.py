@@ -12,14 +12,20 @@ except ImportError:  # pragma: no cover - environment dependent
     openpyxl = None
 
 
+_DEFAULT = object()
+
+
 def finding(name, z, position="CF", grade=50.0, war=3.0, accuracy="High",
-            ratings=None):
+            ratings=None, implied=_DEFAULT):
+    """`implied=None` means genuinely absent; omitting it derives a value."""
     subject = flagging.Subject(name=name, position=position, grade=grade,
                                war=war, meta={"scouting_accuracy": accuracy,
                                               "age": "22"},
                                ratings=ratings or {})
+    implied_grade = grade + 5 * z if implied is _DEFAULT else implied
     return flagging.Finding(subject=subject, expected_war=war - z,
-                            residual=z, z_score=z, group="hitters")
+                            residual=z, z_score=z, group="hitters",
+                            implied_grade=implied_grade)
 
 
 def sample_fit():
@@ -79,7 +85,31 @@ class WriteXlsxTest(unittest.TestCase):
                          65)
 
     def test_grade_label_is_used(self):
-        self.assertEqual([c.value for c in self.sheet[1]][5], "OVR")
+        headers = [c.value for c in self.sheet[1]]
+        self.assertEqual(headers[5], "OVR")
+        self.assertEqual(headers[6], "Implied OVR")
+        self.assertEqual(headers[7], "Implied - OVR")
+
+    def test_implied_grade_and_gap_are_written(self):
+        # Strong Up: grade 50, z 3.1, so implied 50 + 15.5 = 65.5 -> 66.
+        self.assertEqual(self.sheet.cell(row=2, column=7).value, 66)
+        self.assertEqual(self.sheet.cell(row=2, column=8).value, 16)
+
+    def test_an_overrated_player_implies_a_lower_grade(self):
+        self.assertLess(self.sheet.cell(row=6, column=8).value, 0)
+
+    def test_a_missing_implied_grade_leaves_the_cells_empty(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "flat.xlsx")
+            spreadsheet.write_xlsx(path, [finding("Flat", 0.5, implied=None)],
+                                   [sample_fit()])
+            book = openpyxl.load_workbook(path)
+            try:
+                sheet = book["Players"]
+                self.assertIsNone(sheet.cell(row=2, column=7).value)
+                self.assertIsNone(sheet.cell(row=2, column=8).value)
+            finally:
+                book.close()
 
     def test_rows_keep_the_order_they_were_given(self):
         names = [self.sheet.cell(row=r, column=2).value

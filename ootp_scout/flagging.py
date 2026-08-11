@@ -124,6 +124,8 @@ class GroupFit:
     positions: list[str] = field(default_factory=list)
     reference_position: str = ""
     note: str = ""
+    grade_min: float = 0.0
+    grade_max: float = 0.0
 
     @property
     def slope(self) -> float:
@@ -142,6 +144,47 @@ class GroupFit:
         offsets = self.position_offsets
         return value + offsets.get(normalize_position(position), 0.0)
 
+    def implied_grade(self, war: float, position: str) -> float | None:
+        """The grade this WAR would carry if the fit were read backwards.
+
+        `predict` answers "what WAR does this grade imply". This answers the
+        reverse - so a player graded 35 whose projection implies 72 has the gap
+        stated in the units the grade is actually written in, which is easier
+        to argue with than a differential in wins.
+
+        None when the fit carries no grade term (a flat baseline), since then
+        every grade implies the same WAR and the question has no answer.
+        """
+        offset = self.position_offsets.get(normalize_position(position), 0.0)
+        target = war - offset
+
+        # The question is answerable when the fit depends on grade at all, not
+        # merely when it has a linear term: a curve through y = k*g^2 has a
+        # near-zero slope coefficient and is still perfectly invertible.
+        grade_terms = self.coefficients[1:self.degree + 1]
+        if self.degree < 1 or all(abs(c) < 1e-9 for c in grade_terms):
+            return None
+        if self.degree == 1:
+            return (target - self.coefficients[0]) / self.coefficients[1]
+
+        # Quadratic: c2*g^2 + c1*g + (c0 - target) = 0.
+        c0, c1, c2 = self.coefficients[0], self.coefficients[1], self.coefficients[2]
+        if abs(c2) < 1e-12:
+            return (target - c0) / c1
+        discriminant = c1 * c1 - 4.0 * c2 * (c0 - target)
+        if discriminant < 0:
+            # The curve never reaches this WAR at any grade.
+            return None
+        root = discriminant ** 0.5
+        candidates = [(-c1 + root) / (2.0 * c2), (-c1 - root) / (2.0 * c2)]
+        # Both roots are mathematically valid; the meaningful one is the branch
+        # the observed grades actually sit on.
+        inside = [g for g in candidates if self.grade_min <= g <= self.grade_max]
+        if inside:
+            return max(inside)
+        midpoint = (self.grade_min + self.grade_max) / 2.0
+        return min(candidates, key=lambda g: abs(g - midpoint))
+
 
 @dataclass
 class Finding:
@@ -151,6 +194,15 @@ class Finding:
     z_score: float
     group: str
     note: str = ""
+    # The grade this player's projected WAR implies, read off the same fit.
+    implied_grade: float | None = None
+
+    @property
+    def grade_gap(self) -> float | None:
+        """Implied grade minus actual. Positive means the grade is too low."""
+        if self.implied_grade is None:
+            return None
+        return self.implied_grade - self.subject.grade
 
     @property
     def scouting_accuracy(self) -> str:
@@ -238,6 +290,8 @@ def analyze(subjects: list[Subject], degree: int = 1,
     for group, members in sorted(groups.items()):
         fit = _fit_group(members, degree, position_adjust)
         fit.group = group
+        fit.grade_min = min(s.grade for s in members)
+        fit.grade_max = max(s.grade for s in members)
 
         residuals = [s.war - fit.predict(s.grade, s.position) for s in members]
         fit.residual_sd = pstdev(residuals) if len(residuals) > 1 else 0.0
@@ -250,7 +304,8 @@ def analyze(subjects: list[Subject], degree: int = 1,
                 residual=residual,
                 z_score=residual / fit.residual_sd if fit.residual_sd > 1e-9 else 0.0,
                 group=group,
-                note=fit.note))
+                note=fit.note,
+                implied_grade=fit.implied_grade(subject.war, subject.position)))
 
     findings.sort(key=lambda f: f.residual, reverse=True)
     return Analysis(findings=findings, fits=fits)

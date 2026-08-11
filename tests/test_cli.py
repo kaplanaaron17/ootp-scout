@@ -93,6 +93,50 @@ class FlagCommandTest(unittest.TestCase):
         self.assertIn("scouting_accuracy", content.splitlines()[0])
         self.assertIn("Sleeper Sam", content)
 
+    def test_implied_grade_is_printed(self):
+        _, out, _ = run(["flag", REPORT, PROJECTIONS, "--limit", "1",
+                         "--overrated", "0"])
+        self.assertIn("Impl", out)
+        sleeper = next(l for l in out.splitlines() if "Sleeper Sam" in l)
+        # OVR 35 against a 7.30 WAR projection implies a far higher grade.
+        cells = sleeper.split()
+        grade, implied = float(cells[-8]), float(cells[-7])
+        self.assertEqual(grade, 35.0)
+        self.assertGreater(implied, 60.0)
+
+    def test_implied_grade_reaches_the_csv(self):
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "out.csv")
+            run(["flag", REPORT, PROJECTIONS, "--limit", "3",
+                 "--out", destination])
+            with open(destination, encoding="utf-8") as handle:
+                rows = handle.read().splitlines()
+        self.assertIn("implied_grade", rows[0])
+        self.assertIn("grade_gap", rows[0])
+        columns = rows[0].split(",")
+        first = rows[1].split(",")
+        self.assertTrue(first[columns.index("implied_grade")])
+        self.assertTrue(first[columns.index("grade_gap")].startswith("+"))
+
+    def test_implied_grade_reaches_the_spreadsheet(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "pool.xlsx")
+            run(["flag", REPORT, PROJECTIONS, "--out", destination])
+            book = openpyxl.load_workbook(destination)
+            try:
+                sheet = book["Players"]
+                headers = [c.value for c in sheet[1]]
+                self.assertIn("Implied OVR", headers)
+                column = headers.index("Implied OVR") + 1
+                self.assertIsInstance(sheet.cell(row=2, column=column).value,
+                                      (int, float))
+            finally:
+                book.close()
+
     def test_pitchers_get_rwar_columns(self):
         _, out, _ = run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS,
                          "--limit", "3", "--overrated", "0"])

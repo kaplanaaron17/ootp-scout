@@ -62,13 +62,15 @@ Output:
 
 ```
 View: Batting Ratings   Grade column: OVR   Matched: 41 of 41 players
-  fit[hitters] n=41 slope=+0.2191 WAR per grade point, residual sd=1.90
+  fit[hitters] n=41 slope=+0.2201 WAR per grade point, residual sd=1.64
+    position offsets vs C: CF +2.24, SS +1.51, 3B +0.69, 2B -0.41, RF -0.60, 1B -0.89
 
-  #  Player                   Pos  Age   OVR    WAR    Exp   Diff     z  Scouting
----------------------------------------------------------------------------------
-  1  Sleeper Sam              CF    20    35   7.30  -2.80 +10.10  5.32  Low
-  2  Player 28                SS    21    55   3.80   1.58  +2.22  1.17  High
-  3  Player 03                SS    19    50   2.70   0.49  +2.21  1.17  Normal
+MOST UNDERRATED - projecting above what their grade implies
+  #  Player                   Pos  Age   OVR  Impl   +/-    WAR    Exp   Diff     z  Scouting
+---------------------------------------------------------------------------------------------
+  1  Sleeper Sam              CF    20    35    72   +37   7.30  -0.75  +8.05  4.92  Low
+  2  Player 00                RF    28    55    62    +7   2.30   0.82  +1.48  0.91  High
+  3  Player 26                C     21    55    60    +5   2.60   1.41  +1.19  0.73  High
 ```
 
 Name the output `.xlsx` and you get a formatted spreadsheet instead of a CSV.
@@ -113,6 +115,27 @@ Baseball-Reference's rWAR** — do not quote it as one.
 
 The columns appear only when the projections carry innings, so batter runs are
 unaffected.
+
+## The implied grade
+
+Beside each player's actual grade sits the grade his projection *implies* —
+the same fitted line read backwards. Instead of "this player is +8.05 wins
+above expectation", it says **OVR 35, implied 72**, which is the gap stated in
+the units the grade is written in.
+
+```
+  #  Player                   Pos  Age   OVR  Impl   +/-    WAR    Exp   Diff     z  Scouting
+  1  Sleeper Sam              CF    20    35    72   +37   7.30  -0.75  +8.05  4.92  Low
+```
+
+It undoes the position offset too, so two players with the same WAR at
+different positions imply different grades — exactly as they should.
+
+Two caveats. It can land outside the rating scale: a dreadful projection on a
+20-80 save can imply a grade below 20, because the line keeps going where the
+scale stops. And it is blank when the fit has no grade term at all (a pool where
+every grade is identical), since then every grade implies the same WAR and the
+question has no answer.
 
 ## Both ends of the ranking
 
@@ -232,7 +255,7 @@ visible as one and you can discount it yourself.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-154 tests. `tests/fixtures/` holds a 41-player batting export and a 31-player
+174 tests. `tests/fixtures/` holds a 41-player batting export and a 31-player
 pitching export, each with the projections ootpcalculator.com actually returned
 for them. Both pools contain a planted player whose tools are elite and whose
 OVR is 35 — he must come out first.

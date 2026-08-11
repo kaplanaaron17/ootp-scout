@@ -129,6 +129,84 @@ class AnalyzeTest(unittest.TestCase):
         self.assertGreater(cheap.residual, expensive.residual)
 
 
+class ImpliedGradeTest(unittest.TestCase):
+    """The fit read backwards: what grade does this WAR imply?"""
+
+    def _pool(self):
+        return [subject(f"On Line {grade}", float(grade), 0.1 * grade)
+                for grade in range(40, 76, 4)]
+
+    def test_a_player_on_the_line_implies_his_own_grade(self):
+        analysis = flagging.analyze(self._pool(), position_adjust=False)
+        for finding in analysis.findings:
+            with self.subTest(player=finding.subject.name):
+                self.assertAlmostEqual(finding.implied_grade,
+                                       finding.subject.grade, places=6)
+                self.assertAlmostEqual(finding.grade_gap, 0.0, places=6)
+
+    def test_an_underrated_player_implies_a_higher_grade(self):
+        pool = self._pool()
+        pool.append(subject("Sleeper", 45.0, 0.1 * 70))   # a 70's worth of WAR
+        analysis = flagging.analyze(pool, position_adjust=False)
+        sleeper = next(f for f in analysis.findings
+                       if f.subject.name == "Sleeper")
+        self.assertGreater(sleeper.implied_grade, 60.0)
+        self.assertGreater(sleeper.grade_gap, 0.0)
+
+    def test_an_overrated_player_implies_a_lower_grade(self):
+        pool = self._pool()
+        pool.append(subject("Bust", 70.0, 0.1 * 45))
+        analysis = flagging.analyze(pool, position_adjust=False)
+        bust = next(f for f in analysis.findings if f.subject.name == "Bust")
+        self.assertLess(bust.implied_grade, 55.0)
+        self.assertLess(bust.grade_gap, 0.0)
+
+    def test_it_inverts_predict_exactly(self):
+        analysis = flagging.analyze(self._pool(), position_adjust=False)
+        fit = analysis.fits[0]
+        for grade in (42.0, 55.0, 71.0):
+            war = fit.predict(grade, "CF")
+            with self.subTest(grade=grade):
+                self.assertAlmostEqual(fit.implied_grade(war, "CF"), grade,
+                                       places=6)
+
+    def test_the_position_offset_is_undone(self):
+        """Two positions, same WAR - the implied grades must differ."""
+        pool = []
+        for grade in range(40, 76, 5):
+            pool.append(subject(f"1B{grade}", float(grade), 0.1 * grade,
+                                position="1B"))
+            pool.append(subject(f"C{grade}", float(grade), 0.1 * grade + 2.0,
+                                position="C"))
+        fit = flagging.analyze(pool).fits[0]
+        self.assertNotAlmostEqual(fit.implied_grade(5.0, "C"),
+                                  fit.implied_grade(5.0, "1B"), places=3)
+
+    def test_a_quadratic_fit_inverts_too(self):
+        pool = [subject(f"P{g}", float(g), 0.002 * g * g)
+                for g in range(30, 81, 2)]
+        analysis = flagging.analyze(pool, degree=2, position_adjust=False)
+        for finding in analysis.findings:
+            with self.subTest(player=finding.subject.name):
+                self.assertAlmostEqual(finding.implied_grade,
+                                       finding.subject.grade, places=3)
+
+    def test_a_flat_baseline_has_no_implied_grade(self):
+        pool = [subject(f"Flat {i}", 80.0, float(i)) for i in range(4)]
+        analysis = flagging.analyze(pool)
+        self.assertTrue(all(f.implied_grade is None for f in analysis.findings))
+        self.assertTrue(all(f.grade_gap is None for f in analysis.findings))
+
+    def test_it_may_fall_outside_the_rating_scale(self):
+        """Extrapolation is honest: a dreadful projection implies below 20."""
+        pool = self._pool()
+        pool.append(subject("Dreadful", 35.0, -6.0))
+        analysis = flagging.analyze(pool, position_adjust=False)
+        dreadful = next(f for f in analysis.findings
+                        if f.subject.name == "Dreadful")
+        self.assertLess(dreadful.implied_grade, 20.0)
+
+
 class SelectOverratedTest(unittest.TestCase):
     def _pool(self):
         pool = [subject(f"On Line {grade}", float(grade), 0.1 * grade)

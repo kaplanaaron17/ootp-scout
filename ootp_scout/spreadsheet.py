@@ -16,7 +16,8 @@ NOTABLE_Z = 1.0
 
 COLUMNS = [
     ("Rank", 6), ("Player", 24), ("Pos", 6), ("Age", 6), ("Group", 10),
-    ("Grade", 8), ("Projected WAR", 15), ("Expected WAR", 14),
+    ("Grade", 8), ("Implied", 9), ("Implied - Actual", 17),
+    ("Projected WAR", 15), ("Expected WAR", 14),
     ("Differential", 13), ("z", 8), ("Scouting Accuracy", 18),
 ]
 
@@ -63,12 +64,14 @@ def _write_players_sheet(sheet, findings: list[Finding], grade_label: str,
     show_rwar = any(f.subject.rwar is not None for f in findings)
     columns = list(COLUMNS)
     if show_rwar:
-        columns[7:7] = PITCHER_COLUMNS
+        columns[9:9] = PITCHER_COLUMNS
     analysis_width = len(columns)
     columns += [(name, max(7, len(name) + 2)) for name in rating_columns]
 
     headers = [name for name, _width in columns]
     headers[5] = grade_label
+    headers[6] = f"Implied {grade_label}"
+    headers[7] = f"Implied - {grade_label}"
     sheet.append(headers)
     for index, (_name, width) in enumerate(columns, start=1):
         cell = sheet.cell(row=1, column=index)
@@ -92,6 +95,8 @@ def _write_players_sheet(sheet, findings: list[Finding], grade_label: str,
             int(age) if str(age).isdigit() else age,
             finding.group,
             subject.grade,
+            None if finding.implied_grade is None else round(finding.implied_grade),
+            None if finding.grade_gap is None else round(finding.grade_gap),
             round(subject.war, 2),
         ]
         if show_rwar:
