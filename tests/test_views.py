@@ -67,6 +67,44 @@ class IdentifyViewTest(unittest.TestCase):
         self.assertNotIn("GAP", pitcher.headers)
 
 
+class CombinedViewTest(unittest.TestCase):
+    """A custom OOTP view can hold current and potential ratings at once."""
+
+    def setUp(self):
+        # Union of the two batter views, as a custom view would produce.
+        combined = list(BATTER_CURRENT)
+        for header in BATTER_POTENTIAL:
+            if header not in combined:
+                combined.append(header)
+        self.headers = combined
+
+    def test_both_views_are_candidates(self):
+        modes = {v.mode for v in views.candidate_views(self.headers)}
+        self.assertEqual(modes, {views.CURRENT, views.POTENTIAL})
+
+    def test_mode_selects_potential(self):
+        view = views.identify_view(self.headers, mode=views.POTENTIAL)
+        self.assertEqual(view.mode, views.POTENTIAL)
+        self.assertEqual(view.grade_column, "POT")
+
+    def test_mode_selects_current(self):
+        view = views.identify_view(self.headers, mode=views.CURRENT)
+        self.assertEqual(view.grade_column, "OVR")
+
+    def test_asking_for_a_mode_the_export_lacks_says_so(self):
+        with self.assertRaises(ValueError) as caught:
+            views.identify_view(BATTER_CURRENT, mode=views.POTENTIAL)
+        self.assertIn("no potential ratings columns", str(caught.exception))
+
+    def test_a_single_mode_export_has_one_candidate(self):
+        modes = {v.mode for v in views.candidate_views(BATTER_CURRENT)}
+        self.assertEqual(modes, {views.CURRENT})
+
+    def test_mode_is_ignored_when_it_changes_nothing(self):
+        view = views.identify_view(BATTER_CURRENT, mode=views.CURRENT)
+        self.assertEqual(view.mode, views.CURRENT)
+
+
 class CalculatorTypeTest(unittest.TestCase):
     def test_matches_the_sites_download_filename(self):
         """The site says batting/pitching; 'batter'/'pitcher' names no file."""

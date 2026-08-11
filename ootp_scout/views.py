@@ -126,17 +126,37 @@ def _clean(header: str) -> str:
     return header.replace("▾", "").replace("▴", "").strip()
 
 
-def identify_view(headers: list[str]) -> View:
+def candidate_views(headers: list[str]) -> list[View]:
+    """Every view whose required columns are all present.
+
+    More than one can match: a custom OOTP view holding both current and
+    potential ratings satisfies both definitions at once.
+    """
+    present = {_clean(h) for h in headers}
+    return [v for v in VIEWS if set(v.headers) <= present]
+
+
+def identify_view(headers: list[str], mode: str | None = None) -> View:
     """Pick the view whose required headers are all present.
 
     OOTP's report tables may carry extra columns and a sort arrow glyph on the
-    sorted column; both are tolerated. Ambiguity is resolved toward the view
-    that matches more of its optional columns too.
+    sorted column; both are tolerated. `mode` picks between current and
+    potential when an export carries the columns for both.
     """
-    cleaned = [_clean(h) for h in headers]
-    present = set(cleaned)
+    present = {_clean(h) for h in headers}
+    candidates = candidate_views(headers)
 
-    candidates = [v for v in VIEWS if set(v.headers) <= present]
+    if mode:
+        narrowed = [v for v in candidates if v.mode == mode]
+        if not narrowed:
+            if candidates:
+                available = ", ".join(sorted({v.mode for v in candidates}))
+                raise ValueError(
+                    f"this export has no {mode} ratings columns - it carries "
+                    f"{available}. For a {mode} run, add those columns to the "
+                    "view in OOTP and re-export.")
+        candidates = narrowed or candidates
+
     if not candidates:
         best = max(VIEWS, key=lambda v: len(set(v.headers) & present))
         missing = [h for h in best.headers if h not in present]

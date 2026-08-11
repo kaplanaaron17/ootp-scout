@@ -53,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
                          help="the rating scale your export uses. The default "
                               "works it out from the ratings themselves and "
                               "tells you which to pick on the site.")
+    prepare.add_argument("--mode", choices=("current", "potential"),
+                         default=None,
+                         help="pick current or potential ratings when the "
+                              "export carries both (a custom OOTP view often "
+                              "does)")
     prepare.add_argument("--no-copy", dest="copy", action="store_false",
                          help="do not put the paste block on the clipboard")
     prepare.set_defaults(copy=True)
@@ -69,6 +74,9 @@ def build_parser() -> argparse.ArgumentParser:
     flag.add_argument("--out", help="write the flagged players here; a .xlsx "
                                     "name gets a formatted, highlighted "
                                     "spreadsheet, anything else a plain CSV")
+    flag.add_argument("--mode", choices=("current", "potential"), default=None,
+                      help="pick current or potential ratings when the export "
+                           "carries both (a custom OOTP view often does)")
     flag.add_argument("--limit", type=int, default=25,
                       help="how many players to report (default: 25)")
     flag.add_argument("--min-z", type=float, default=None,
@@ -109,9 +117,14 @@ def resolve_report(value: str | None, use_latest: bool = False) -> str:
     return found.path
 
 
-def _load_report(path: str) -> tuple[views.View, list[views.ExportRow], list]:
+def _load_report(path: str, mode: str | None = None
+                 ) -> tuple[views.View, list[views.ExportRow], list]:
     headers, raw_rows = tables.read_table(path)
-    view = views.identify_view(headers)
+    view = views.identify_view(headers, mode=mode)
+    if mode is None and len({v.mode for v in views.candidate_views(headers)}) > 1:
+        print(f"NOTE: this export carries both current and potential ratings. "
+              f"Using {view.mode} - pass --mode to choose the other.",
+              file=sys.stderr)
     rows, problems = views.parse_rows(headers, raw_rows, view)
     return view, rows, problems
 
@@ -119,7 +132,7 @@ def _load_report(path: str) -> tuple[views.View, list[views.ExportRow], list]:
 def command_prepare(args: argparse.Namespace) -> int:
     try:
         report = resolve_report(args.report, args.latest)
-        view, rows, problems = _load_report(report)
+        view, rows, problems = _load_report(report, args.mode)
         headers, raw_rows = tables.read_table(report)
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -193,7 +206,7 @@ def command_prepare(args: argparse.Namespace) -> int:
 def command_flag(args: argparse.Namespace) -> int:
     try:
         report = resolve_report(args.report)
-        view, rows, problems = _load_report(report)
+        view, rows, problems = _load_report(report, args.mode)
     except (OSError, ValueError) as error:
         print(f"error reading {args.report}: {error}", file=sys.stderr)
         return 1

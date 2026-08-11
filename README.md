@@ -146,6 +146,25 @@ The **default draft-pool view will not work** — it exports OVR and POT and no
 underlying ratings, so there is nothing to project from. `prepare` says so and
 names the view you want instead.
 
+### Custom views, and pages that will not take a view
+
+Some OOTP pages (the organization view among them) have a fixed layout and will
+not let you pick a ratings view. Use a page that does — a player list filtered
+to the organization, minors included — and build a **custom view** with the
+columns above. Extra columns are tolerated, so one custom view can hold
+everything you like.
+
+If a custom view carries current *and* potential ratings, both definitions match
+and the tool says so, defaulting to current:
+
+```
+NOTE: this export carries both current and potential ratings. Using current - pass --mode to choose the other.
+```
+
+`--mode potential` (or `--mode current`) picks. That means one export can feed
+both analyses: run `prepare`/`flag` once per mode, pasting each into the
+calculator separately.
+
 ### Rating scales
 
 The scale is detected from the ratings themselves and printed — match the
