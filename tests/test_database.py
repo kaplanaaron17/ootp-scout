@@ -174,6 +174,73 @@ class StoreTest(unittest.TestCase):
     def test_migrate_is_idempotent(self):
         self.assertEqual(database.migrate(self.connection), [])
 
+    def test_leagues_are_kept_apart(self):
+        database.record(self.connection, [
+            observation("Al Alpha", league="Top Shelf", scale="20 to 80"),
+            observation("Bo Bravo", league="Top Shelf", scale="20 to 80"),
+            observation("Cy Charlie", league="Sim Nation", scale="1 to 100"),
+        ])
+        self.assertEqual(len(database.latest(self.connection,
+                                             league="Top Shelf")), 2)
+        self.assertEqual(len(database.latest(self.connection,
+                                             league="Sim Nation")), 1)
+
+    def test_the_same_name_in_two_leagues_is_two_players(self):
+        """Online leagues generate names independently; collisions happen."""
+        database.record(self.connection, [
+            observation("Al Alpha", league="Top Shelf", grade=45.0),
+            observation("Al Alpha", league="Sim Nation", grade=70.0),
+        ])
+        self.assertEqual(len(database.latest(self.connection)), 2)
+        top = database.latest(self.connection, league="Top Shelf")
+        self.assertEqual(top[0]["grade"], 45.0)
+
+    def test_leagues_reports_scale_and_size(self):
+        database.record(self.connection, [
+            observation("Al Alpha", league="Top Shelf", scale="20 to 80"),
+            observation("Cy Charlie", league="Sim Nation", scale="1 to 100"),
+        ])
+        held = {entry["league"]: entry for entry in
+                database.leagues(self.connection)}
+        self.assertEqual(held["Top Shelf"]["scales"], ["20 to 80"])
+        self.assertEqual(held["Sim Nation"]["scales"], ["1 to 100"])
+        self.assertEqual(held["Top Shelf"]["players"], 1)
+
+    def test_forget_removes_one_league_and_leaves_the_others(self):
+        database.record(self.connection, [
+            observation("Al Alpha", league="Top Shelf"),
+            observation("Bo Bravo", league="Top Shelf"),
+            observation("Cy Charlie", league="Sim Nation"),
+        ])
+        removed = database.forget(self.connection, "Top Shelf")
+        self.assertEqual(removed, 2)
+        remaining = database.latest(self.connection)
+        self.assertEqual([r["name"] for r in remaining], ["Cy Charlie"])
+
+    def test_forgetting_an_unknown_league_removes_nothing(self):
+        database.record(self.connection, [observation("Al Alpha",
+                                                      league="Top Shelf")])
+        self.assertEqual(database.forget(self.connection, "Nowhere"), 0)
+        self.assertEqual(len(database.latest(self.connection)), 1)
+
+    def test_teams_can_be_scoped_to_one_league(self):
+        database.record(self.connection, [
+            observation("Al Alpha", league="Top Shelf", team="Louisville"),
+            observation("Cy Charlie", league="Sim Nation", team="Toledo"),
+        ])
+        self.assertEqual(database.teams(self.connection, league="Top Shelf"),
+                         [("Louisville", 1)])
+
+    def test_history_can_be_scoped_to_one_league(self):
+        database.record(self.connection, [
+            observation("Al Alpha", league="Top Shelf", grade=45.0),
+            observation("Al Alpha", league="Sim Nation", grade=70.0),
+        ])
+        self.assertEqual(len(database.history(self.connection, "Al Alpha")), 2)
+        scoped = database.history(self.connection, "Al Alpha",
+                                  league="Sim Nation")
+        self.assertEqual([r["grade"] for r in scoped], [70.0])
+
     def test_stats_summarise_the_store(self):
         database.record(self.connection, [
             observation("Hitter", role="batter"),

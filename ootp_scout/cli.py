@@ -97,6 +97,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="also list the N most overrated players - those "
                            "projecting furthest below their grade (default: "
                            "10; 0 turns it off)")
+    flag.add_argument("--league", default=None,
+                      help="which league this pool belongs to. Taken from the "
+                           "save the report came out of when not given.")
     flag.add_argument("--no-save", dest="save", action="store_false",
                       help="do not record this run in the database")
     flag.set_defaults(save=True)
@@ -110,6 +113,8 @@ def build_parser() -> argparse.ArgumentParser:
     lookup = subparsers.add_parser(
         "lookup", help="look a player up in the database")
     lookup.add_argument("name", help="full or partial player name")
+    lookup.add_argument("--league", default=None,
+                        help="restrict to one league")
     lookup.add_argument("--db", default=None)
 
     report = subparsers.add_parser(
@@ -121,6 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "the database holds most of)")
     report.add_argument("--role", choices=("batter", "pitcher"), default=None,
                         help="restrict to hitters or pitchers")
+    report.add_argument("--league", default=None,
+                        help="which league to report on. Required when the "
+                             "database holds more than one, since leagues use "
+                             "different rating scales and must not be mixed.")
     report.add_argument("--team", default=None,
                         help="restrict to one organisation (partial names "
                              "match, so 'louisville' is enough)")
@@ -139,6 +148,17 @@ def build_parser() -> argparse.ArgumentParser:
     stats = subparsers.add_parser(
         "stats", help="what the database currently holds")
     stats.add_argument("--db", default=None)
+
+    leagues = subparsers.add_parser(
+        "leagues", help="list the leagues in the database")
+    leagues.add_argument("--db", default=None)
+
+    forget = subparsers.add_parser(
+        "forget", help="delete a league and everything recorded for it")
+    forget.add_argument("league", help="exact league name, as `leagues` lists it")
+    forget.add_argument("--yes", action="store_true",
+                        help="skip the confirmation prompt")
+    forget.add_argument("--db", default=None)
 
     return parser
 
@@ -346,11 +366,14 @@ def command_flag(args: argparse.Namespace) -> int:
         print(f"  line {line_number}: {detail}", file=sys.stderr)
 
     if args.save:
+        league = args.league or reports.league_from_path(report) or "default"
+        scale, _reason = views.infer_scale(rows, view)
         try:
             connection = database.connect(args.db)
             observations = [
                 database.Observation(
                     name=subject.name, mode=view.mode, role=view.role,
+                    league=league, scale=scale or "",
                     team=subject.meta.get("team", ""),
                     position=subject.position,
                     age=(int(subject.meta["age"])
@@ -362,8 +385,8 @@ def command_flag(args: argparse.Namespace) -> int:
             added, refreshed = database.record(connection, observations,
                                                source=os.path.basename(report))
             connection.close()
-            print(f"\nDatabase: {added} new, {refreshed} updated "
-                  f"({args.db or database.default_path()})")
+            print(f"\nDatabase: {added} new, {refreshed} updated in league "
+                  f"{league!r} ({args.db or database.default_path()})")
         except sqlite3.Error as error:
             print(f"(could not write to the database: {error})", file=sys.stderr)
 
@@ -469,6 +492,41 @@ def _write_csv(path: str, findings: list[flagging.Finding]) -> None:
             })
 
 
+def resolve_league(connection, requested: str | None) -> str | None:
+    """Which league to work on. None means "stop, and a message was printed".
+
+    Leagues are never merged. Different leagues run different rating scales,
+    so a 55 in one is not a 55 in another and a fit spanning both would be
+    meaningless. With one league the choice is obvious; with several the user
+    has to say, because guessing wrong is invisible in the output.
+    """
+    held = database.leagues(connection)
+    if not held:
+        print("The database is empty. Run `flag` first.", file=sys.stderr)
+        return None
+    if requested:
+        names = [entry["league"] for entry in held]
+        if requested not in names:
+            close = [n for n in names if requested.lower() in n.lower()]
+            if len(close) == 1:
+                return close[0]
+            print(f"No league named {requested!r}. Held: "
+                  + ", ".join(repr(n) for n in names), file=sys.stderr)
+            return None
+        return requested
+    if len(held) == 1:
+        return held[0]["league"]
+
+    print(f"The database holds {len(held)} leagues. They are never combined - "
+          "each has its own talent pool and run environment, and they may use "
+          "different rating scales - so pass --league:", file=sys.stderr)
+    for entry in held:
+        scales = ", ".join(entry["scales"]) or "scale unknown"
+        print(f"  {entry['league']!r}  {entry['players']} players  ({scales})",
+              file=sys.stderr)
+    return None
+
+
 def _subjects_from_rows(rows) -> list[flagging.Subject]:
     return [
         flagging.Subject(
@@ -487,6 +545,11 @@ def _subjects_from_rows(rows) -> list[flagging.Subject]:
 def command_lookup(args: argparse.Namespace) -> int:
     connection = database.connect(args.db)
     try:
+        league = None
+        if args.league:
+            league = resolve_league(connection, args.league)
+            if league is None:
+                return 1
         matches = database.search(connection, args.name)
         if not matches:
             print(f"No player matching {args.name!r} in the database. "
@@ -506,7 +569,7 @@ def command_lookup(args: argparse.Namespace) -> int:
             matches = exact
 
         name = matches[0]["name"]
-        records = database.history(connection, name)
+        records = database.history(connection, name, league=league)
         print(f"{name} - {len(records)} observation(s)\n")
         header = (f"  {'Seen':<12} {'Mode':<10} {'Team':<16} {'Pos':<4} "
                   f"{'Age':>3} {'Grade':>6} {'WAR':>6} {'Scouting':<12} "
@@ -542,13 +605,16 @@ def command_lookup(args: argparse.Namespace) -> int:
 def command_report(args: argparse.Namespace) -> int:
     connection = database.connect(args.db)
     try:
+        league = resolve_league(connection, args.league)
+        if league is None:
+            return 1
         mode = args.mode
         if mode is None:
             counts = {}
-            for row in database.latest(connection):
+            for row in database.latest(connection, league=league):
                 counts[row["mode"]] = counts.get(row["mode"], 0) + 1
             if not counts:
-                print("The database is empty. Run `flag` first.",
+                print(f"Nothing recorded for league {league!r}.",
                       file=sys.stderr)
                 return 1
             mode = max(counts, key=counts.get)
@@ -558,7 +624,7 @@ def command_report(args: argparse.Namespace) -> int:
                       + f". Using {mode} - pass --mode to choose.",
                       file=sys.stderr)
         rows = database.latest(connection, mode=mode, role=args.role,
-                               team=args.team)
+                               team=args.team, league=league)
     finally:
         connection.close()
 
@@ -583,8 +649,8 @@ def command_report(args: argparse.Namespace) -> int:
                                min_z=args.min_z)
     grade_label = "POT" if mode == views.POTENTIAL else "OVR"
 
-    print(f"Database report: {len(subjects)} players, {mode} ratings, "
-          f"refitted together")
+    print(f"Database report: {league} - {len(subjects)} players, "
+          f"{mode} ratings, refitted together")
     for fit in analysis.fits:
         print(f"  fit[{fit.group}] n={fit.count} slope={fit.slope:+.4f} "
               f"WAR per grade point, residual sd={fit.residual_sd:.2f}"
@@ -642,6 +708,10 @@ def command_stats(args: argparse.Namespace) -> int:
           f"last seen {summary['last_seen'][:10]}")
     for mode, role, players in summary["by_mode"]:
         print(f"    {mode:<10} {role:<8} {players} players")
+    for entry in summary.get("leagues") or []:
+        scales = ", ".join(entry["scales"]) or "scale unknown"
+        print(f"  league {entry['league']!r}: {entry['players']} players "
+              f"({scales})")
     held = summary.get("teams") or []
     if held:
         print(f"  {len(held)} organisation(s):")
@@ -655,6 +725,61 @@ def command_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_leagues(args: argparse.Namespace) -> int:
+    connection = database.connect(args.db)
+    try:
+        held = database.leagues(connection)
+    finally:
+        connection.close()
+    if not held:
+        print("No leagues recorded yet. Run `flag` on a pool first.")
+        return 0
+    header = (f"{'League':<28} {'Players':>8} {'Records':>8} "
+              f"{'Last seen':<12} Scale")
+    print(header)
+    print("-" * len(header))
+    for entry in held:
+        scales = ", ".join(entry["scales"]) or "unknown"
+        print(f"{entry['league'][:28]:<28} {entry['players']:>8} "
+              f"{entry['observations']:>8} {entry['last_seen'][:10]:<12} "
+              f"{scales}")
+    if len(held) > 1:
+        scales = {scale for entry in held for scale in entry["scales"]}
+        print("\nLeagues are always fitted separately, so their numbers are "
+              "not comparable with each other.")
+        if len(scales) > 1:
+            print("These are on different rating scales (" +
+                  ", ".join(sorted(scales)) + "), so a grade in one is not a "
+                  "grade in another either.")
+    return 0
+
+
+def command_forget(args: argparse.Namespace) -> int:
+    connection = database.connect(args.db)
+    try:
+        held = {entry["league"]: entry for entry in database.leagues(connection)}
+        if args.league not in held:
+            print(f"No league named {args.league!r}. Held: "
+                  + (", ".join(repr(n) for n in held) or "none"),
+                  file=sys.stderr)
+            return 1
+        entry = held[args.league]
+        print(f"This will delete {entry['observations']} record(s) covering "
+              f"{entry['players']} player(s) in league {args.league!r}.")
+        print("It cannot be undone - the observations are not recoverable "
+              "without re-exporting and re-running the calculator.")
+        if not args.yes:
+            answer = input("Type the league name to confirm: ").strip()
+            if answer != args.league:
+                print("Not deleted.")
+                return 1
+        removed = database.forget(connection, args.league)
+        print(f"Deleted {removed} record(s) for {args.league!r}.")
+        return 0
+    finally:
+        connection.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "prepare":
@@ -665,6 +790,10 @@ def main(argv: list[str] | None = None) -> int:
         return command_report(args)
     if args.command == "stats":
         return command_stats(args)
+    if args.command == "leagues":
+        return command_leagues(args)
+    if args.command == "forget":
+        return command_forget(args)
     return command_flag(args)
 
 

@@ -34,6 +34,7 @@ DEFAULT_FILENAME = "ootp_scout.db"
 TABLE = """
 CREATE TABLE IF NOT EXISTS observations (
     id                INTEGER PRIMARY KEY,
+    league            TEXT    NOT NULL DEFAULT '',
     name_key          TEXT    NOT NULL,
     name              TEXT    NOT NULL,
     mode              TEXT    NOT NULL,
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS observations (
     war               REAL,
     rwar              REAL,
     scouting_accuracy TEXT,
+    scale             TEXT,
     ratings           TEXT,
     seen_at           TEXT    NOT NULL,
     source            TEXT
@@ -58,11 +60,13 @@ INDEXES = """
 CREATE INDEX IF NOT EXISTS observations_by_name ON observations (name_key);
 CREATE INDEX IF NOT EXISTS observations_by_mode ON observations (mode, role);
 CREATE INDEX IF NOT EXISTS observations_by_team ON observations (team);
+CREATE INDEX IF NOT EXISTS observations_by_league ON observations (league);
 -- One row per player per mode per day: re-running the same export should
 -- correct that day's record rather than pile up duplicates, while a run on a
 -- later date is a genuinely new observation worth keeping.
+-- Scoped by league: the same name in two leagues is two different players.
 CREATE UNIQUE INDEX IF NOT EXISTS observations_unique
-    ON observations (name_key, mode, substr(seen_at, 1, 10));
+    ON observations (league, name_key, mode, substr(seen_at, 1, 10));
 """
 
 
@@ -76,6 +80,7 @@ class Observation:
     name: str
     mode: str
     role: str
+    league: str = ""
     team: str = ""
     position: str = ""
     age: int | None = None
@@ -83,6 +88,7 @@ class Observation:
     war: float | None = None
     rwar: float | None = None
     scouting_accuracy: str = ""
+    scale: str = ""
     ratings: dict[str, str] | None = None
     seen_at: str = ""
     source: str = ""
@@ -95,7 +101,9 @@ class Observation:
 # Columns added after the first release, as (name, declaration). A database
 # created by an earlier version is migrated in place rather than rejected -
 # the whole point of the store is that it accumulates over a save.
-MIGRATIONS = (("team", "TEXT"),)
+MIGRATIONS = (("team", "TEXT"),
+              ("league", "TEXT NOT NULL DEFAULT ''"),
+              ("scale", "TEXT"))
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
@@ -141,40 +149,46 @@ def record(connection: sqlite3.Connection, observations: list[Observation],
         seen_at = observation.seen_at or stamp
         day = seen_at[:10]
         existing = connection.execute(
-            "SELECT id FROM observations WHERE name_key = ? AND mode = ? "
-            "AND substr(seen_at, 1, 10) = ?",
-            (observation.name_key, observation.mode, day)).fetchone()
+            "SELECT id FROM observations WHERE league = ? AND name_key = ? "
+            "AND mode = ? AND substr(seen_at, 1, 10) = ?",
+            (observation.league, observation.name_key, observation.mode,
+             day)).fetchone()
         values = (
+            observation.league,
             observation.name_key, observation.name, observation.mode,
             observation.role, observation.team, observation.position,
             observation.age,
             observation.grade, observation.war, observation.rwar,
-            observation.scouting_accuracy,
+            observation.scouting_accuracy, observation.scale,
             json.dumps(observation.ratings or {}, sort_keys=True),
             seen_at, observation.source or source,
         )
         if existing:
             connection.execute(
-                "UPDATE observations SET name_key=?, name=?, mode=?, role=?, "
-                "team=?, position=?, age=?, grade=?, war=?, rwar=?, "
-                "scouting_accuracy=?, ratings=?, seen_at=?, source=? "
-                "WHERE id=?", values + (existing["id"],))
+                "UPDATE observations SET league=?, name_key=?, name=?, "
+                "mode=?, role=?, team=?, position=?, age=?, grade=?, war=?, "
+                "rwar=?, scouting_accuracy=?, scale=?, ratings=?, seen_at=?, "
+                "source=? WHERE id=?", values + (existing["id"],))
             updated += 1
         else:
             connection.execute(
-                "INSERT INTO observations (name_key, name, mode, role, team, "
-                "position, age, grade, war, rwar, scouting_accuracy, ratings, "
-                "seen_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", values)
+                "INSERT INTO observations (league, name_key, name, mode, "
+                "role, team, position, age, grade, war, rwar, "
+                "scouting_accuracy, scale, ratings, seen_at, source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", values)
             inserted += 1
     connection.commit()
     return inserted, updated
 
 
 def latest(connection: sqlite3.Connection, mode: str | None = None,
-           role: str | None = None, team: str | None = None
-           ) -> list[sqlite3.Row]:
+           role: str | None = None, team: str | None = None,
+           league: str | None = None) -> list[sqlite3.Row]:
     """The most recent observation of each player, one row per player."""
     clauses, params = [], []
+    if league is not None:
+        clauses.append("league = ?")
+        params.append(league)
     if mode:
         clauses.append("mode = ?")
         params.append(mode)
@@ -190,20 +204,25 @@ def latest(connection: sqlite3.Connection, mode: str | None = None,
     # id breaks ties within a day, so "latest" is deterministic.
     return connection.execute(
         f"""SELECT o.* FROM observations o
-            JOIN (SELECT name_key, mode, MAX(seen_at) AS seen_at,
+            JOIN (SELECT league, name_key, mode, MAX(seen_at) AS seen_at,
                          MAX(id) AS id
                   FROM observations {where}
-                  GROUP BY name_key, mode) newest
-              ON o.name_key = newest.name_key AND o.mode = newest.mode
-             AND o.id = newest.id
+                  GROUP BY league, name_key, mode) newest
+              ON o.league = newest.league AND o.name_key = newest.name_key
+             AND o.mode = newest.mode AND o.id = newest.id
             ORDER BY o.name""", params).fetchall()
 
 
-def history(connection: sqlite3.Connection, name: str) -> list[sqlite3.Row]:
+def history(connection: sqlite3.Connection, name: str,
+            league: str | None = None) -> list[sqlite3.Row]:
     """Every observation of one player, oldest first."""
+    if league is None:
+        return connection.execute(
+            "SELECT * FROM observations WHERE name_key = ? "
+            "ORDER BY seen_at, id", (name.strip().lower(),)).fetchall()
     return connection.execute(
-        "SELECT * FROM observations WHERE name_key = ? "
-        "ORDER BY seen_at, id", (name.strip().lower(),)).fetchall()
+        "SELECT * FROM observations WHERE name_key = ? AND league = ? "
+        "ORDER BY seen_at, id", (name.strip().lower(), league)).fetchall()
 
 
 def search(connection: sqlite3.Connection, fragment: str,
@@ -217,12 +236,48 @@ def search(connection: sqlite3.Connection, fragment: str,
         (pattern, limit)).fetchall()
 
 
-def teams(connection: sqlite3.Connection) -> list[tuple[str, int]]:
-    """Every team held, with how many players each has."""
+def leagues(connection: sqlite3.Connection) -> list[dict[str, object]]:
+    """Every league held, with size, scale and when it was last updated."""
     rows = connection.execute(
-        """SELECT team, COUNT(DISTINCT name_key) AS players
-           FROM observations WHERE team IS NOT NULL AND team != ''
-           GROUP BY team ORDER BY players DESC, team""").fetchall()
+        """SELECT league,
+                  COUNT(DISTINCT name_key) AS players,
+                  COUNT(*)                 AS observations,
+                  MAX(seen_at)             AS last_seen
+           FROM observations GROUP BY league ORDER BY players DESC, league"""
+    ).fetchall()
+    result = []
+    for row in rows:
+        scales = connection.execute(
+            "SELECT DISTINCT scale FROM observations WHERE league = ? "
+            "AND scale IS NOT NULL AND scale != ''",
+            (row["league"],)).fetchall()
+        result.append({
+            "league": row["league"],
+            "players": row["players"],
+            "observations": row["observations"],
+            "last_seen": row["last_seen"],
+            "scales": sorted(s["scale"] for s in scales),
+        })
+    return result
+
+
+def forget(connection: sqlite3.Connection, league: str) -> int:
+    """Delete every observation from one league. Returns rows removed."""
+    cursor = connection.execute("DELETE FROM observations WHERE league = ?",
+                                (league,))
+    connection.commit()
+    return cursor.rowcount
+
+
+def teams(connection: sqlite3.Connection,
+          league: str | None = None) -> list[tuple[str, int]]:
+    """Every team held, with how many players each has."""
+    clause = "AND league = ?" if league is not None else ""
+    params = (league,) if league is not None else ()
+    rows = connection.execute(
+        f"""SELECT team, COUNT(DISTINCT name_key) AS players
+            FROM observations WHERE team IS NOT NULL AND team != '' {clause}
+            GROUP BY team ORDER BY players DESC, team""", params).fetchall()
     return [(row["team"], row["players"]) for row in rows]
 
 
@@ -237,6 +292,7 @@ def stats(connection: sqlite3.Connection) -> dict[str, object]:
         """SELECT mode, role, COUNT(DISTINCT name_key) AS players
            FROM observations GROUP BY mode, role ORDER BY mode, role""").fetchall()
     return {
+        "leagues": leagues(connection),
         "teams": teams(connection),
         "observations": row["observations"],
         "players": row["players"],

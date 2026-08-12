@@ -25,7 +25,17 @@ PITCHER_REPORT = os.path.join(FIXTURES, "pool_pitchers.tsv")
 PITCHER_PROJECTIONS = os.path.join(FIXTURES, "pitching-projections.csv")
 
 
+# Commands that touch the database. Without an explicit --db they would use
+# the real ootp_scout.db beside the tool, so a test run would write into the
+# user's own league data - and, as it turned out, make the suite twenty times
+# slower as that file grew. Every run is pointed at a throwaway file instead.
+_DB_COMMANDS = {"flag", "report", "lookup", "stats", "leagues", "forget"}
+_SCRATCH = tempfile.TemporaryDirectory()
+
+
 def run(argv):
+    if argv and argv[0] in _DB_COMMANDS and "--db" not in argv:
+        argv = list(argv) + ["--db", os.path.join(_SCRATCH.name, "scratch.db")]
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
         code = cli.main(argv)
@@ -435,6 +445,92 @@ class DatabaseCommandTest(unittest.TestCase):
         _, out, _ = run(["stats", "--db", self.db])
         self.assertIn("72 players", out)
         self.assertIn("72 observations", out)
+
+
+class MultiLeagueTest(unittest.TestCase):
+    """Two leagues on different rating scales must never share a fit."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.db = os.path.join(self.folder.name, "two.db")
+        run(["flag", REPORT, PROJECTIONS, "--overrated", "0",
+             "--league", "Top Shelf", "--db", self.db])
+        run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS, "--overrated", "0",
+             "--league", "Sim Nation", "--db", self.db])
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_leagues_lists_both(self):
+        code, out, _ = run(["leagues", "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("Top Shelf", out)
+        self.assertIn("Sim Nation", out)
+
+    def test_leagues_shows_the_scale_of_each(self):
+        _, out, _ = run(["leagues", "--db", self.db])
+        self.assertIn("20 to 80", out)
+
+    def test_report_refuses_to_guess_between_leagues(self):
+        code, _, err = run(["report", "--db", self.db])
+        self.assertEqual(code, 1)
+        self.assertIn("different rating scales", err)
+        self.assertIn("Top Shelf", err)
+        self.assertIn("Sim Nation", err)
+
+    def test_report_works_when_told_which_league(self):
+        code, out, _ = run(["report", "--league", "Top Shelf", "--limit", "3",
+                            "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("Top Shelf", out)
+        self.assertIn("Sleeper Sam", out)
+        # The other league's players must not leak into this fit.
+        self.assertNotIn("Ace Sleeper", out)
+
+    def test_a_partial_league_name_resolves(self):
+        code, out, _ = run(["report", "--league", "sim", "--limit", "3",
+                            "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("Ace Sleeper", out)
+
+    def test_an_unknown_league_lists_what_is_held(self):
+        code, _, err = run(["report", "--league", "Nowhere", "--db", self.db])
+        self.assertEqual(code, 1)
+        self.assertIn("No league named", err)
+        self.assertIn("Top Shelf", err)
+
+    def test_stats_breaks_down_by_league(self):
+        _, out, _ = run(["stats", "--db", self.db])
+        self.assertIn("Top Shelf", out)
+        self.assertIn("Sim Nation", out)
+
+    def test_forget_removes_one_league_only(self):
+        code, out, _ = run(["forget", "Top Shelf", "--yes", "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("Deleted", out)
+        _, listed, _ = run(["leagues", "--db", self.db])
+        self.assertNotIn("Top Shelf", listed)
+        self.assertIn("Sim Nation", listed)
+
+    def test_forget_refuses_an_unknown_league(self):
+        code, _, err = run(["forget", "Nowhere", "--yes", "--db", self.db])
+        self.assertEqual(code, 1)
+        self.assertIn("No league named", err)
+
+    def test_after_forgetting_one_report_needs_no_league(self):
+        run(["forget", "Top Shelf", "--yes", "--db", self.db])
+        code, out, _ = run(["report", "--limit", "2", "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("Sim Nation", out)
+
+    def test_a_single_league_database_needs_no_flag(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = os.path.join(folder, "one.db")
+            run(["flag", REPORT, PROJECTIONS, "--overrated", "0",
+                 "--league", "Only One", "--db", db])
+            code, out, _ = run(["report", "--limit", "2", "--db", db])
+        self.assertEqual(code, 0)
+        self.assertIn("Only One", out)
 
 
 class PrepareCommandTest(unittest.TestCase):

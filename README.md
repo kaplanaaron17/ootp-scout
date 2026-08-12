@@ -151,6 +151,30 @@ Re-running the same export on the same day corrects that day's record rather
 than piling up duplicates; a run on a later date is a genuinely new
 observation. `--no-save` skips recording entirely.
 
+## Multiple leagues
+
+If you play in several online leagues, each is kept separate:
+
+```bash
+python -m ootp_scout leagues                        # what is held
+python -m ootp_scout report --league "Sim Nation"   # one league
+python -m ootp_scout forget "Old League"            # remove one
+```
+
+The league is taken from the save the report came out of — OOTP writes reports
+inside `saved_games/<save>.lg/`, so it identifies itself and you need not say.
+`--league` overrides when a report has been moved somewhere else.
+
+**Leagues are never combined, and `report` refuses to guess between them.**
+Each has its own talent pool and run environment, and they may run different
+rating scales — a 55 on 20-80 is not a 55 on 1-100. A fit spanning both would
+be meaningless, and the output would look perfectly normal, so the tool asks
+rather than picking. With a single league in the database no flag is needed.
+
+The scale is recorded per league, and `leagues` shows it. `forget` deletes a
+league and everything recorded for it; it asks you to type the name to confirm,
+or takes `--yes`.
+
 ## rWAR, for pitchers
 
 The calculator reports one WAR for pitchers, sitting next to FIP — so it is the

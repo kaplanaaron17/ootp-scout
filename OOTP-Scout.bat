@@ -28,9 +28,10 @@ echo     [3]  Record only     you have already downloaded the CSV
 echo.
 echo   USE THE DATABASE
 echo     [4]  Look up a player
-echo     [5]  League report   spreadsheet of everything held
+echo     [5]  League report   spreadsheet of one league
 echo     [6]  Prospect report same, graded against POT
 echo     [7]  What is stored
+echo     [8]  List leagues
 echo.
 echo     [Q]  Quit
 echo ----------------------------------------------------------------
@@ -44,6 +45,7 @@ if /i "%pick%"=="4" goto LOOKUP
 if /i "%pick%"=="5" goto LEAGUE
 if /i "%pick%"=="6" goto PROSPECTS
 if /i "%pick%"=="7" goto STATS
+if /i "%pick%"=="8" goto LEAGUES
 if /i "%pick%"=="q" goto QUIT
 
 REM A stray Enter should just redraw the menu, but if input has gone away
@@ -110,9 +112,21 @@ python -m ootp_scout lookup "%who%"
 goto DONE
 
 
+:LEAGUES
+echo.
+python -m ootp_scout leagues
+goto DONE
+
+
 :LEAGUE
 echo.
-python -m ootp_scout report --mode current --out league.xlsx
+python -m ootp_scout leagues
+echo.
+set "lg="
+set /p "lg=League (blank if you only have one): "
+echo.
+if "%lg%"=="" python -m ootp_scout report --mode current --out league.xlsx
+if not "%lg%"=="" python -m ootp_scout report --mode current --league "%lg%" --out league.xlsx
 if errorlevel 1 goto PROBLEM
 echo.
 echo Opening league.xlsx...
@@ -122,7 +136,13 @@ goto DONE
 
 :PROSPECTS
 echo.
-python -m ootp_scout report --mode potential --out prospects.xlsx
+python -m ootp_scout leagues
+echo.
+set "lg="
+set /p "lg=League (blank if you only have one): "
+echo.
+if "%lg%"=="" python -m ootp_scout report --mode potential --out prospects.xlsx
+if not "%lg%"=="" python -m ootp_scout report --mode potential --league "%lg%" --out prospects.xlsx
 if errorlevel 1 goto PROBLEM
 echo.
 echo Opening prospects.xlsx...

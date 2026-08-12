@@ -102,6 +102,25 @@ def find_latest_projections(folders: list[str] | None = None) -> str:
     return max(candidates)[1]
 
 
+def league_from_path(path: str) -> str:
+    """The save a report came out of, used as the league name.
+
+    OOTP writes reports inside the save that produced them:
+
+        .../saved_games/<save>.lg/news/html/temp/<file>.html
+
+    so the league identifies itself and the user does not have to. Returns ""
+    when the path is not in that shape - a report copied elsewhere, or a hand
+    made TSV - and the caller can fall back or ask.
+    """
+    parts = os.path.normpath(os.path.abspath(path)).split(os.sep)
+    for index, part in enumerate(parts):
+        if part.lower() == "saved_games" and index + 1 < len(parts):
+            save = parts[index + 1]
+            return save[:-3] if save.lower().endswith(".lg") else save
+    return ""
+
+
 def find_latest(roots: list[str] | None = None) -> FoundReport:
     reports = find_reports(roots)
     if not reports:
