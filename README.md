@@ -52,15 +52,20 @@ Or double-click **`OOTP-Scout.bat`**, which walks through all of the above and
 returns to a menu afterwards rather than closing:
 
 ```
-  [1]  Full run       export -> calculator -> spreadsheet
-  [2]  Prepare only   read the export, copy the paste block
-  [3]  Results only   you have already downloaded the CSV
-  [4]  Results, prospects   same, but graded against POT
-  [Q]  Quit
+  ADD TO THE DATABASE
+    [1]  Full run        export -> calculator -> database
+    [2]  Prepare only    read the export, copy the paste block
+    [3]  Record only     you have already downloaded the CSV
+
+  USE THE DATABASE
+    [4]  Look up a player
+    [5]  League report   spreadsheet of everything held
+    [6]  Prospect report same, graded against POT
+    [7]  What is stored
 ```
 
-Option 3 is the useful one when you want to re-run the analysis with the CSV you
-already have — no need to redo the export or the paste.
+Recording a pool no longer writes a spreadsheet. Everything accumulates in the
+database, and options 5 and 6 build a sheet from all of it when you want one.
 
 HTML, TSV and CSV are all accepted wherever a report is expected, so if you
 prefer to select the table in the browser and copy it yourself, paste it into a

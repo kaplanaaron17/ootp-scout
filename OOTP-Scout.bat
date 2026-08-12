@@ -1,6 +1,9 @@
 @echo off
 REM Double-click this to run the workflow. It returns to the menu after each
-REM action instead of closing, so you can do several runs in one sitting.
+REM action instead of closing.
+REM
+REM Everything you record accumulates in ootp_scout.db. Spreadsheets are made
+REM on demand from that database rather than one per run.
 REM
 REM The rating scale is detected from the export, so this works whether OOTP
 REM is set to 20-80 or 1-100. Match the site's RATINGS SCALE dropdown to the
@@ -18,19 +21,29 @@ set "blanks=0"
 :MENU
 echo.
 echo ----------------------------------------------------------------
-echo   [1]  Full run       export -^> calculator -^> spreadsheet
-echo   [2]  Prepare only   read the export, copy the paste block
-echo   [3]  Results only   you have already downloaded the CSV
-echo   [4]  Results, prospects   same, but graded against POT
-echo   [Q]  Quit
+echo   ADD TO THE DATABASE
+echo     [1]  Full run        export -^> calculator -^> database
+echo     [2]  Prepare only    read the export, copy the paste block
+echo     [3]  Record only     you have already downloaded the CSV
+echo.
+echo   USE THE DATABASE
+echo     [4]  Look up a player
+echo     [5]  League report   spreadsheet of everything held
+echo     [6]  Prospect report same, graded against POT
+echo     [7]  What is stored
+echo.
+echo     [Q]  Quit
 echo ----------------------------------------------------------------
 set "pick="
 set /p "pick=Choose: "
 
 if /i "%pick%"=="1" goto FULL
 if /i "%pick%"=="2" goto PREPARE_ONLY
-if /i "%pick%"=="3" goto RESULTS
-if /i "%pick%"=="4" goto RESULTS_POT
+if /i "%pick%"=="3" goto RECORD
+if /i "%pick%"=="4" goto LOOKUP
+if /i "%pick%"=="5" goto LEAGUE
+if /i "%pick%"=="6" goto PROSPECTS
+if /i "%pick%"=="7" goto STATS
 if /i "%pick%"=="q" goto QUIT
 
 REM A stray Enter should just redraw the menu, but if input has gone away
@@ -70,7 +83,7 @@ echo    4. Click DOWNLOAD CSV
 echo.
 pause
 echo.
-goto RESULTS
+goto RECORD
 
 
 :PREPARE_ONLY
@@ -80,19 +93,36 @@ if errorlevel 1 goto PROBLEM
 goto DONE
 
 
-:RESULTS
+:RECORD
 echo.
-python -m ootp_scout flag latest latest --out targets.xlsx
+python -m ootp_scout flag latest latest --limit 15
 if errorlevel 1 goto PROBLEM
-echo.
-echo Opening targets.xlsx...
-start "" "targets.xlsx"
 goto DONE
 
 
-:RESULTS_POT
+:LOOKUP
 echo.
-python -m ootp_scout flag latest latest --mode potential --out prospects.xlsx
+set "who="
+set /p "who=Player name (or part of one): "
+if "%who%"=="" goto MENU
+echo.
+python -m ootp_scout lookup "%who%"
+goto DONE
+
+
+:LEAGUE
+echo.
+python -m ootp_scout report --mode current --out league.xlsx
+if errorlevel 1 goto PROBLEM
+echo.
+echo Opening league.xlsx...
+start "" "league.xlsx"
+goto DONE
+
+
+:PROSPECTS
+echo.
+python -m ootp_scout report --mode potential --out prospects.xlsx
 if errorlevel 1 goto PROBLEM
 echo.
 echo Opening prospects.xlsx...
@@ -100,9 +130,14 @@ start "" "prospects.xlsx"
 goto DONE
 
 
+:STATS
+echo.
+python -m ootp_scout stats
+goto DONE
+
+
 :DONE
 echo.
-echo Done. Green rows are the strongest flags.
 pause
 goto MENU
 
