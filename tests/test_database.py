@@ -1,6 +1,7 @@
 """The persistent observation store."""
 
 import os
+import sqlite3
 import tempfile
 import unittest
 
@@ -8,9 +9,9 @@ from ootp_scout import database
 
 
 def observation(name, mode="current", role="batter", grade=50.0, war=3.0,
-                seen_at="2026-04-01T12:00:00+00:00", **kwargs):
+                seen_at="2026-04-01T12:00:00+00:00", team="", **kwargs):
     return database.Observation(name=name, mode=mode, role=role, grade=grade,
-                                war=war, seen_at=seen_at, **kwargs)
+                                war=war, seen_at=seen_at, team=team, **kwargs)
 
 
 class StoreTest(unittest.TestCase):
@@ -111,6 +112,67 @@ class StoreTest(unittest.TestCase):
                                      seen_at="2027-04-01T12:00:00+00:00")])
         self.assertEqual(database.search(self.connection, "alpha")[0]["records"],
                          2)
+
+    def test_team_is_stored_and_filterable(self):
+        database.record(self.connection, [
+            observation("Al Alpha", team="Louisville"),
+            observation("Bo Bravo", team="Louisville"),
+            observation("Cy Charlie", team="Toledo"),
+        ])
+        self.assertEqual(len(database.latest(self.connection,
+                                             team="Louisville")), 2)
+        self.assertEqual(len(database.latest(self.connection, team="Toledo")), 1)
+
+    def test_team_filter_is_case_insensitive_and_partial(self):
+        database.record(self.connection,
+                        [observation("Al Alpha", team="Louisville Bats")])
+        self.assertEqual(len(database.latest(self.connection,
+                                             team="louisville")), 1)
+
+    def test_teams_lists_what_is_held(self):
+        database.record(self.connection, [
+            observation("Al Alpha", team="Louisville"),
+            observation("Bo Bravo", team="Louisville"),
+            observation("Cy Charlie", team="Toledo"),
+        ])
+        self.assertEqual(database.teams(self.connection),
+                         [("Louisville", 2), ("Toledo", 1)])
+
+    def test_players_without_a_team_are_not_listed_as_one(self):
+        database.record(self.connection, [observation("Al Alpha", team="")])
+        self.assertEqual(database.teams(self.connection), [])
+
+    def test_a_database_from_before_the_team_column_is_migrated(self):
+        """An existing save's database must gain the column, not break."""
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "old.db")
+            old = sqlite3.connect(path)
+            old.execute("""CREATE TABLE observations (
+                id INTEGER PRIMARY KEY, name_key TEXT NOT NULL,
+                name TEXT NOT NULL, mode TEXT NOT NULL, role TEXT NOT NULL,
+                position TEXT, age INTEGER, grade REAL, war REAL, rwar REAL,
+                scouting_accuracy TEXT, ratings TEXT, seen_at TEXT NOT NULL,
+                source TEXT)""")
+            old.execute("INSERT INTO observations (name_key, name, mode, role, "
+                        "seen_at) VALUES ('old guy','Old Guy','current',"
+                        "'batter','2026-01-01T00:00:00+00:00')")
+            old.commit()
+            old.close()
+
+            connection = database.connect(path)
+            try:
+                rows = database.latest(connection)
+                self.assertEqual(len(rows), 1)
+                self.assertIsNone(rows[0]["team"])
+                # And it accepts new records carrying a team.
+                database.record(connection, [observation("New Guy",
+                                                         team="Toledo")])
+                self.assertEqual(database.teams(connection), [("Toledo", 1)])
+            finally:
+                connection.close()
+
+    def test_migrate_is_idempotent(self):
+        self.assertEqual(database.migrate(self.connection), [])
 
     def test_stats_summarise_the_store(self):
         database.record(self.connection, [

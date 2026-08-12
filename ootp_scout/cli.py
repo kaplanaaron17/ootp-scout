@@ -23,7 +23,7 @@ BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
 
 REPORT_FIELDS = [
-    "rank", "name", "position", "age", "group", "grade", "implied_grade",
+    "rank", "name", "team", "position", "age", "group", "grade", "implied_grade",
     "grade_gap", "projected_war", "rwar", "rwar_minus_war", "expected_war",
     "residual", "z_score", "scouting_accuracy",
 ]
@@ -121,6 +121,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "the database holds most of)")
     report.add_argument("--role", choices=("batter", "pitcher"), default=None,
                         help="restrict to hitters or pitchers")
+    report.add_argument("--team", default=None,
+                        help="restrict to one organisation (partial names "
+                             "match, so 'louisville' is enough)")
     report.add_argument("--limit", type=int, default=25)
     report.add_argument("--overrated", type=int, default=10, metavar="N")
     report.add_argument("--min-z", type=float, default=None)
@@ -348,6 +351,7 @@ def command_flag(args: argparse.Namespace) -> int:
             observations = [
                 database.Observation(
                     name=subject.name, mode=view.mode, role=view.role,
+                    team=subject.meta.get("team", ""),
                     position=subject.position,
                     age=(int(subject.meta["age"])
                          if subject.meta.get("age", "").isdigit() else None),
@@ -399,7 +403,11 @@ def _format_table(findings: list[flagging.Finding], grade_label: str) -> str:
     # actually has one - a batter table stays as narrow as it was.
     show_rwar = any(f.subject.rwar is not None for f in findings)
     show_implied = any(f.implied_grade is not None for f in findings)
-    header = (f"{'#':>3}  {'Player':<24} {'Pos':<4} {'Age':>3} {grade_label:>5} ")
+    show_team = any(f.subject.meta.get("team") for f in findings)
+    header = f"{'#':>3}  {'Player':<24} "
+    if show_team:
+        header += f"{'Team':<14} "
+    header += f"{'Pos':<4} {'Age':>3} {grade_label:>5} "
     if show_implied:
         header += f"{'Impl':>5} {'+/-':>5} "
     header += f"{'WAR':>6} "
@@ -410,8 +418,11 @@ def _format_table(findings: list[flagging.Finding], grade_label: str) -> str:
     lines = [header, "-" * len(header)]
     for rank, finding in enumerate(findings, start=1):
         subject = finding.subject
-        row = (f"{rank:>3}  {subject.name[:24]:<24} {subject.position[:4]:<4} "
-               f"{subject.meta.get('age', ''):>3} {subject.grade:>5.0f} ")
+        row = f"{rank:>3}  {subject.name[:24]:<24} "
+        if show_team:
+            row += f"{subject.meta.get('team', '')[:14]:<14} "
+        row += (f"{subject.position[:4]:<4} "
+                f"{subject.meta.get('age', ''):>3} {subject.grade:>5.0f} ")
         if show_implied:
             if finding.implied_grade is None:
                 row += f"{'-':>5} {'-':>5} "
@@ -438,6 +449,7 @@ def _write_csv(path: str, findings: list[flagging.Finding]) -> None:
             writer.writerow({
                 "rank": rank,
                 "name": subject.name,
+                "team": subject.meta.get("team", ""),
                 "position": subject.position,
                 "age": subject.meta.get("age", ""),
                 "group": finding.group,
@@ -465,7 +477,8 @@ def _subjects_from_rows(rows) -> list[flagging.Subject]:
             is_pitcher=row["role"] == views.PITCHER,
             rwar=row["rwar"],
             meta={"scouting_accuracy": row["scouting_accuracy"] or "",
-                  "age": str(row["age"]) if row["age"] is not None else ""},
+                  "age": str(row["age"]) if row["age"] is not None else "",
+                  "team": row["team"] or ""},
             ratings=database.to_ratings(row))
         for row in rows
         if row["grade"] is not None and row["war"] is not None]
@@ -495,14 +508,16 @@ def command_lookup(args: argparse.Namespace) -> int:
         name = matches[0]["name"]
         records = database.history(connection, name)
         print(f"{name} - {len(records)} observation(s)\n")
-        header = (f"  {'Seen':<12} {'Mode':<10} {'Pos':<4} {'Age':>3} "
-                  f"{'Grade':>6} {'WAR':>6} {'Scouting':<12} Ratings")
+        header = (f"  {'Seen':<12} {'Mode':<10} {'Team':<16} {'Pos':<4} "
+                  f"{'Age':>3} {'Grade':>6} {'WAR':>6} {'Scouting':<12} "
+                  f"Ratings")
         print(header)
         print("  " + "-" * (len(header) - 2))
         for row in records:
             ratings = database.to_ratings(row)
             shown = " ".join(f"{k} {v}" for k, v in list(ratings.items())[:6])
             print(f"  {row['seen_at'][:10]:<12} {row['mode']:<10} "
+                  f"{(row['team'] or '')[:16]:<16} "
                   f"{(row['position'] or ''):<4} "
                   f"{(row['age'] if row['age'] is not None else ''):>3} "
                   f"{(row['grade'] if row['grade'] is not None else 0):>6.0f} "
@@ -542,15 +557,24 @@ def command_report(args: argparse.Namespace) -> int:
                       + ", ".join(f"{n} {m}" for m, n in sorted(counts.items()))
                       + f". Using {mode} - pass --mode to choose.",
                       file=sys.stderr)
-        rows = database.latest(connection, mode=mode, role=args.role)
+        rows = database.latest(connection, mode=mode, role=args.role,
+                               team=args.team)
     finally:
         connection.close()
 
     subjects = _subjects_from_rows(rows)
     if len(subjects) < MIN_MATCHES:
+        scope = f" for team {args.team!r}" if args.team else ""
         print(f"error: only {len(subjects)} usable {mode} player(s) in the "
-              "database - not enough to fit against.", file=sys.stderr)
+              f"database{scope} - not enough to fit against.", file=sys.stderr)
+        if args.team:
+            print("A one-team fit is thin anyway; consider dropping --team so "
+                  "the baseline comes from the whole league.", file=sys.stderr)
         return 1
+
+    if args.team:
+        print(f"NOTE: fitting within {args.team!r} only, so the baseline is "
+              "that organisation rather than the league.", file=sys.stderr)
 
     analysis = flagging.analyze(subjects, degree=args.degree,
                                 split_by_role=not args.pool,
@@ -618,6 +642,16 @@ def command_stats(args: argparse.Namespace) -> int:
           f"last seen {summary['last_seen'][:10]}")
     for mode, role, players in summary["by_mode"]:
         print(f"    {mode:<10} {role:<8} {players} players")
+    held = summary.get("teams") or []
+    if held:
+        print(f"  {len(held)} organisation(s):")
+        for name, players in held[:15]:
+            print(f"    {name:<24} {players} players")
+        if len(held) > 15:
+            print(f"    ... and {len(held) - 15} more")
+    else:
+        print("  no team column in the exports so far - add one in OOTP to "
+              "search by organisation")
     return 0
 
 

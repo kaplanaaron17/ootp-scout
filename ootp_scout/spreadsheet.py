@@ -23,6 +23,8 @@ COLUMNS = [
 
 # Added after Projected WAR when the sheet contains pitchers.
 PITCHER_COLUMNS = [("rWAR", 9), ("rWAR - WAR", 13)]
+# Added after Player when the export carried an organisation column.
+TEAM_COLUMN = ("Team", 16)
 
 
 class SpreadsheetUnavailable(RuntimeError):
@@ -62,16 +64,23 @@ def _write_players_sheet(sheet, findings: list[Finding], grade_label: str,
     # rWAR only exists for pitchers, so a batters-only sheet keeps its old
     # shape and no reader is left wondering why two columns are empty.
     show_rwar = any(f.subject.rwar is not None for f in findings)
+    show_team = any(f.subject.meta.get("team") for f in findings)
     columns = list(COLUMNS)
+    if show_team:
+        columns.insert(2, TEAM_COLUMN)
     if show_rwar:
-        columns[9:9] = PITCHER_COLUMNS
+        columns.insert(columns.index(("Projected WAR", 15)) + 1,
+                       PITCHER_COLUMNS[1])
+        columns.insert(columns.index(("Projected WAR", 15)) + 1,
+                       PITCHER_COLUMNS[0])
     analysis_width = len(columns)
     columns += [(name, max(7, len(name) + 2)) for name in rating_columns]
 
     headers = [name for name, _width in columns]
-    headers[5] = grade_label
-    headers[6] = f"Implied {grade_label}"
-    headers[7] = f"Implied - {grade_label}"
+    grade_index = headers.index("Grade")
+    headers[grade_index] = grade_label
+    headers[grade_index + 1] = f"Implied {grade_label}"
+    headers[grade_index + 2] = f"Implied - {grade_label}"
     sheet.append(headers)
     for index, (_name, width) in enumerate(columns, start=1):
         cell = sheet.cell(row=1, column=index)
@@ -88,9 +97,10 @@ def _write_players_sheet(sheet, findings: list[Finding], grade_label: str,
     for rank, finding in enumerate(findings, start=1):
         subject = finding.subject
         age = subject.meta.get("age", "")
-        values = [
-            rank,
-            subject.name,
+        values = [rank, subject.name]
+        if show_team:
+            values.append(subject.meta.get("team", ""))
+        values += [
             subject.position,
             int(age) if str(age).isdigit() else age,
             finding.group,

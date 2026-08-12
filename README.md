@@ -122,6 +122,18 @@ python -m ootp_scout report --out league.xlsx # rank everything held
 python -m ootp_scout stats                    # what is in there
 ```
 
+```bash
+python -m ootp_scout report --team louisville    # one organisation
+python -m ootp_scout report --role pitcher       # arms only
+```
+
+`--team` matches partially and ignores case, so `louisville` finds whatever
+OOTP actually writes. It needs an organisation column in your export — add
+`ORG` or `TM` to the view and it is picked up automatically; `stats` lists the
+organisations held. Fitting inside one organisation says so, because a
+fourteen-player baseline is far noisier than a league-wide one and the
+resulting numbers are not comparable with a full-league run.
+
 `lookup` takes a partial name and lists candidates if more than one matches.
 When a player has been seen more than once it shows how his grade and
 projection moved between the first look and the latest — in a save played over

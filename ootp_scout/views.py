@@ -110,6 +110,20 @@ class ExportRow:
         return self.values.get("SctAcc", "").strip() or "unknown"
 
     @property
+    def team(self) -> str:
+        """Whichever team column the export happens to carry.
+
+        None of the four ratings views includes one, so this is populated only
+        when it has been added to a custom view. OOTP labels it TM on some
+        pages and ORG on others, and a player without one shows "-".
+        """
+        for column in ("ORG", "Org", "Organization", "TM", "Team"):
+            value = (self.values.get(column) or "").strip()
+            if value and value != "-":
+                return value
+        return ""
+
+    @property
     def age(self) -> str:
         return self.values.get("Age", "").strip()
 
@@ -119,7 +133,8 @@ class ExportRow:
 
     @property
     def meta(self) -> dict[str, str]:
-        return {"scouting_accuracy": self.scouting_accuracy, "age": self.age}
+        return {"scouting_accuracy": self.scouting_accuracy, "age": self.age,
+                "team": self.team}
 
 
 def _clean(header: str) -> str:

@@ -31,13 +31,14 @@ from datetime import datetime, timezone
 
 DEFAULT_FILENAME = "ootp_scout.db"
 
-SCHEMA = """
+TABLE = """
 CREATE TABLE IF NOT EXISTS observations (
     id                INTEGER PRIMARY KEY,
     name_key          TEXT    NOT NULL,
     name              TEXT    NOT NULL,
     mode              TEXT    NOT NULL,
     role              TEXT    NOT NULL,
+    team              TEXT,
     position          TEXT,
     age               INTEGER,
     grade             REAL,
@@ -48,8 +49,15 @@ CREATE TABLE IF NOT EXISTS observations (
     seen_at           TEXT    NOT NULL,
     source            TEXT
 );
+"""
+
+# Kept separate from TABLE and applied *after* migration: an index naming a
+# column that a migration has yet to add would fail on an older database, and
+# take the connection down with it.
+INDEXES = """
 CREATE INDEX IF NOT EXISTS observations_by_name ON observations (name_key);
 CREATE INDEX IF NOT EXISTS observations_by_mode ON observations (mode, role);
+CREATE INDEX IF NOT EXISTS observations_by_team ON observations (team);
 -- One row per player per mode per day: re-running the same export should
 -- correct that day's record rather than pile up duplicates, while a run on a
 -- later date is a genuinely new observation worth keeping.
@@ -68,6 +76,7 @@ class Observation:
     name: str
     mode: str
     role: str
+    team: str = ""
     position: str = ""
     age: int | None = None
     grade: float | None = None
@@ -83,11 +92,40 @@ class Observation:
         return self.name.strip().lower()
 
 
+# Columns added after the first release, as (name, declaration). A database
+# created by an earlier version is migrated in place rather than rejected -
+# the whole point of the store is that it accumulates over a save.
+MIGRATIONS = (("team", "TEXT"),)
+
+
 def connect(path: str | None = None) -> sqlite3.Connection:
     connection = sqlite3.connect(path or default_path())
     connection.row_factory = sqlite3.Row
-    connection.executescript(SCHEMA)
+    try:
+        connection.executescript(TABLE)
+        migrate(connection)
+        connection.executescript(INDEXES)
+    except Exception:
+        # Leaving a half-opened connection behind locks the file on Windows,
+        # which turns a schema problem into an unopenable database.
+        connection.close()
+        raise
     return connection
+
+
+def migrate(connection: sqlite3.Connection) -> list[str]:
+    """Add any columns missing from an older database. Returns what it added."""
+    existing = {row["name"] for row in
+                connection.execute("PRAGMA table_info(observations)")}
+    added = []
+    for column, declaration in MIGRATIONS:
+        if column not in existing:
+            connection.execute(
+                f"ALTER TABLE observations ADD COLUMN {column} {declaration}")
+            added.append(column)
+    if added:
+        connection.commit()
+    return added
 
 
 def _now() -> str:
@@ -108,7 +146,8 @@ def record(connection: sqlite3.Connection, observations: list[Observation],
             (observation.name_key, observation.mode, day)).fetchone()
         values = (
             observation.name_key, observation.name, observation.mode,
-            observation.role, observation.position, observation.age,
+            observation.role, observation.team, observation.position,
+            observation.age,
             observation.grade, observation.war, observation.rwar,
             observation.scouting_accuracy,
             json.dumps(observation.ratings or {}, sort_keys=True),
@@ -117,22 +156,23 @@ def record(connection: sqlite3.Connection, observations: list[Observation],
         if existing:
             connection.execute(
                 "UPDATE observations SET name_key=?, name=?, mode=?, role=?, "
-                "position=?, age=?, grade=?, war=?, rwar=?, "
+                "team=?, position=?, age=?, grade=?, war=?, rwar=?, "
                 "scouting_accuracy=?, ratings=?, seen_at=?, source=? "
                 "WHERE id=?", values + (existing["id"],))
             updated += 1
         else:
             connection.execute(
-                "INSERT INTO observations (name_key, name, mode, role, "
+                "INSERT INTO observations (name_key, name, mode, role, team, "
                 "position, age, grade, war, rwar, scouting_accuracy, ratings, "
-                "seen_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", values)
+                "seen_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", values)
             inserted += 1
     connection.commit()
     return inserted, updated
 
 
 def latest(connection: sqlite3.Connection, mode: str | None = None,
-           role: str | None = None) -> list[sqlite3.Row]:
+           role: str | None = None, team: str | None = None
+           ) -> list[sqlite3.Row]:
     """The most recent observation of each player, one row per player."""
     clauses, params = [], []
     if mode:
@@ -141,6 +181,11 @@ def latest(connection: sqlite3.Connection, mode: str | None = None,
     if role:
         clauses.append("role = ?")
         params.append(role)
+    if team:
+        # Substring so "Louisville" finds it without exact-matching whatever
+        # OOTP writes, and case-insensitive so the user need not match it.
+        clauses.append("LOWER(team) LIKE ?")
+        params.append(f"%{team.strip().lower()}%")
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     # id breaks ties within a day, so "latest" is deterministic.
     return connection.execute(
@@ -172,6 +217,15 @@ def search(connection: sqlite3.Connection, fragment: str,
         (pattern, limit)).fetchall()
 
 
+def teams(connection: sqlite3.Connection) -> list[tuple[str, int]]:
+    """Every team held, with how many players each has."""
+    rows = connection.execute(
+        """SELECT team, COUNT(DISTINCT name_key) AS players
+           FROM observations WHERE team IS NOT NULL AND team != ''
+           GROUP BY team ORDER BY players DESC, team""").fetchall()
+    return [(row["team"], row["players"]) for row in rows]
+
+
 def stats(connection: sqlite3.Connection) -> dict[str, object]:
     row = connection.execute(
         """SELECT COUNT(*) AS observations,
@@ -183,6 +237,7 @@ def stats(connection: sqlite3.Connection) -> dict[str, object]:
         """SELECT mode, role, COUNT(DISTINCT name_key) AS players
            FROM observations GROUP BY mode, role ORDER BY mode, role""").fetchall()
     return {
+        "teams": teams(connection),
         "observations": row["observations"],
         "players": row["players"],
         "first_seen": row["first_seen"],

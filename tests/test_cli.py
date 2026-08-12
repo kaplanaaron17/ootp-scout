@@ -302,7 +302,7 @@ class FlagCommandTest(unittest.TestCase):
                  "--out", destination])
             with open(destination, encoding="utf-8") as handle:
                 first = handle.readline()
-        self.assertTrue(first.startswith("rank,name,position"))
+        self.assertTrue(first.startswith("rank,name,team,position"))
 
     def test_mismatched_projections_file_fails_clearly(self):
         code, _, err = run(["flag", REPORT, REPORT])
