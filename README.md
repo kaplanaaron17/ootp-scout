@@ -105,6 +105,35 @@ fitted line, the position offsets and the thresholds, so the numbers can be
 argued with rather than just trusted. Writing `.xlsx` needs `openpyxl`; a `.csv`
 name stays dependency-free.
 
+## The database
+
+Every `flag` run records what it saw into `ootp_scout.db` (SQLite, standard
+library, gitignored). Over a save this accumulates into a reference you can
+consult instead of regenerating a spreadsheet each time.
+
+```bash
+python -m ootp_scout lookup "Sleeper Sam"     # one player, with his history
+python -m ootp_scout report --out league.xlsx # rank everything held
+python -m ootp_scout stats                    # what is in there
+```
+
+`lookup` takes a partial name and lists candidates if more than one matches.
+When a player has been seen more than once it shows how his grade and
+projection moved between the first look and the latest — in a save played over
+seasons, that movement is the part no single snapshot can give you.
+
+**What is stored is observations, not rankings.** A residual is measured
+against whoever else was in that run, so a +2.0 inside a 41-player draft class
+and a +2.0 across 800 league players are not the same claim. Storing both in
+one table would invite comparing them. Instead the database keeps the raw facts
+— grade, projected WAR, ratings, age, on a date — and `report` refits across
+whatever you ask for. Query the whole league and you get a league-wide fit;
+`--role pitcher` fits only arms.
+
+Re-running the same export on the same day corrects that day's record rather
+than piling up duplicates; a run on a later date is a genuinely new
+observation. `--no-save` skips recording entirely.
+
 ## rWAR, for pitchers
 
 The calculator reports one WAR for pitchers, sitting next to FIP — so it is the

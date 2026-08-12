@@ -348,6 +348,95 @@ class FlagCommandTest(unittest.TestCase):
                             for line in out.splitlines()))
 
 
+class DatabaseCommandTest(unittest.TestCase):
+    """flag records what it saw; lookup and report read it back."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.db = os.path.join(self.folder.name, "test.db")
+        run(["flag", REPORT, PROJECTIONS, "--overrated", "0", "--db", self.db])
+        run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS, "--overrated", "0",
+             "--db", self.db])
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_flag_records_both_pools(self):
+        _, out, _ = run(["stats", "--db", self.db])
+        self.assertIn("72 players", out)
+        self.assertIn("batter", out)
+        self.assertIn("pitcher", out)
+
+    def test_no_save_leaves_the_database_alone(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = os.path.join(folder, "untouched.db")
+            run(["flag", REPORT, PROJECTIONS, "--no-save", "--db", db])
+            _, out, _ = run(["stats", "--db", db])
+        self.assertIn("empty", out)
+
+    def test_lookup_finds_a_player(self):
+        code, out, _ = run(["lookup", "Sleeper Sam", "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("Sleeper Sam", out)
+        self.assertIn("observation", out)
+
+    def test_lookup_lists_candidates_for_a_partial_name(self):
+        _, out, _ = run(["lookup", "sleeper", "--db", self.db])
+        self.assertIn("Sleeper Sam", out)
+        self.assertIn("Ace Sleeper", out)
+
+    def test_lookup_on_an_unknown_player_explains(self):
+        code, _, err = run(["lookup", "Nobody At All", "--db", self.db])
+        self.assertEqual(code, 1)
+        self.assertIn("Run `flag`", err)
+
+    def test_report_refits_across_the_whole_database(self):
+        code, out, _ = run(["report", "--limit", "5", "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("72 players", out)
+        # Both pools' planted players surface in one combined ranking.
+        self.assertIn("Sleeper Sam", out)
+        self.assertIn("Ace Sleeper", out)
+
+    def test_report_keeps_roles_fitted_separately(self):
+        _, out, _ = run(["report", "--db", self.db])
+        self.assertIn("fit[hitters]", out)
+        self.assertIn("fit[pitchers]", out)
+
+    def test_report_can_restrict_to_one_role(self):
+        _, out, _ = run(["report", "--role", "pitcher", "--db", self.db])
+        self.assertIn("fit[pitchers]", out)
+        self.assertNotIn("fit[hitters]", out)
+
+    def test_report_writes_a_spreadsheet(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "db.xlsx")
+            code, _, _ = run(["report", "--out", destination, "--db", self.db])
+            self.assertEqual(code, 0)
+            book = openpyxl.load_workbook(destination)
+            try:
+                self.assertEqual(book["Players"].max_row, 73)  # 72 players
+            finally:
+                book.close()
+
+    def test_report_on_an_empty_database_explains(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = os.path.join(folder, "empty.db")
+            code, _, err = run(["report", "--db", db])
+        self.assertEqual(code, 1)
+        self.assertIn("empty", err)
+
+    def test_rerunning_the_same_pool_does_not_duplicate(self):
+        run(["flag", REPORT, PROJECTIONS, "--overrated", "0", "--db", self.db])
+        _, out, _ = run(["stats", "--db", self.db])
+        self.assertIn("72 players", out)
+        self.assertIn("72 observations", out)
+
+
 class PrepareCommandTest(unittest.TestCase):
     def test_detects_the_view_and_writes_a_paste_block(self):
         with tempfile.TemporaryDirectory() as folder:

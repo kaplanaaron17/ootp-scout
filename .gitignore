@@ -1,6 +1,7 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 /*.tsv
 /*.csv
 /*.html
 /*.xlsx
+/*.db

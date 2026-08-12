@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
+import sqlite3
 import sys
 
 from datetime import datetime
 
-from . import (clipboard, flagging, pitching, projections, reports,
-               spreadsheet, tables, views)
+from . import (clipboard, database, flagging, pitching, projections,
+               reports, spreadsheet, tables, views)
 
 BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
@@ -95,10 +97,46 @@ def build_parser() -> argparse.ArgumentParser:
                       help="also list the N most overrated players - those "
                            "projecting furthest below their grade (default: "
                            "10; 0 turns it off)")
+    flag.add_argument("--no-save", dest="save", action="store_false",
+                      help="do not record this run in the database")
+    flag.set_defaults(save=True)
+    flag.add_argument("--db", default=None,
+                      help="database file (default: ootp_scout.db beside the "
+                           "tool)")
     flag.add_argument("--highlight-z", type=float, default=spreadsheet.STRONG_Z,
                       help="differential (in standard deviations) that counts "
                            "as a strong flag in the spreadsheet "
                            f"(default: {spreadsheet.STRONG_Z})")
+    lookup = subparsers.add_parser(
+        "lookup", help="look a player up in the database")
+    lookup.add_argument("name", help="full or partial player name")
+    lookup.add_argument("--db", default=None)
+
+    report = subparsers.add_parser(
+        "report", help="rank everything in the database, refitted together")
+    report.add_argument("--out", help="write a spreadsheet or CSV here")
+    report.add_argument("--mode", choices=("current", "potential"),
+                        default=None,
+                        help="restrict to one grade column (default: whichever "
+                             "the database holds most of)")
+    report.add_argument("--role", choices=("batter", "pitcher"), default=None,
+                        help="restrict to hitters or pitchers")
+    report.add_argument("--limit", type=int, default=25)
+    report.add_argument("--overrated", type=int, default=10, metavar="N")
+    report.add_argument("--min-z", type=float, default=None)
+    report.add_argument("--degree", type=int, default=1)
+    report.add_argument("--pool", action="store_true")
+    report.add_argument("--no-position", dest="position_adjust",
+                        action="store_false")
+    report.set_defaults(position_adjust=True)
+    report.add_argument("--highlight-z", type=float,
+                        default=spreadsheet.STRONG_Z)
+    report.add_argument("--db", default=None)
+
+    stats = subparsers.add_parser(
+        "stats", help="what the database currently holds")
+    stats.add_argument("--db", default=None)
+
     return parser
 
 
@@ -304,6 +342,27 @@ def command_flag(args: argparse.Namespace) -> int:
     for line_number, detail in problems + projection_problems:
         print(f"  line {line_number}: {detail}", file=sys.stderr)
 
+    if args.save:
+        try:
+            connection = database.connect(args.db)
+            observations = [
+                database.Observation(
+                    name=subject.name, mode=view.mode, role=view.role,
+                    position=subject.position,
+                    age=(int(subject.meta["age"])
+                         if subject.meta.get("age", "").isdigit() else None),
+                    grade=subject.grade, war=subject.war, rwar=subject.rwar,
+                    scouting_accuracy=subject.meta.get("scouting_accuracy", ""),
+                    ratings=subject.ratings)
+                for subject in subjects]
+            added, refreshed = database.record(connection, observations,
+                                               source=os.path.basename(report))
+            connection.close()
+            print(f"\nDatabase: {added} new, {refreshed} updated "
+                  f"({args.db or database.default_path()})")
+        except sqlite3.Error as error:
+            print(f"(could not write to the database: {error})", file=sys.stderr)
+
     if args.out:
         if args.out.lower().endswith((".xlsx", ".xlsm")):
             try:
@@ -398,10 +457,180 @@ def _write_csv(path: str, findings: list[flagging.Finding]) -> None:
             })
 
 
+def _subjects_from_rows(rows) -> list[flagging.Subject]:
+    return [
+        flagging.Subject(
+            name=row["name"], position=row["position"] or "",
+            grade=row["grade"], war=row["war"],
+            is_pitcher=row["role"] == views.PITCHER,
+            rwar=row["rwar"],
+            meta={"scouting_accuracy": row["scouting_accuracy"] or "",
+                  "age": str(row["age"]) if row["age"] is not None else ""},
+            ratings=database.to_ratings(row))
+        for row in rows
+        if row["grade"] is not None and row["war"] is not None]
+
+
+def command_lookup(args: argparse.Namespace) -> int:
+    connection = database.connect(args.db)
+    try:
+        matches = database.search(connection, args.name)
+        if not matches:
+            print(f"No player matching {args.name!r} in the database. "
+                  "Run `flag` on a pool that contains him first.",
+                  file=sys.stderr)
+            return 1
+        if len(matches) > 1:
+            exact = [m for m in matches
+                     if m["name"].strip().lower() == args.name.strip().lower()]
+            if not exact:
+                print(f"{len(matches)} players match {args.name!r}:")
+                for match in matches:
+                    print(f"  {match['name']}  ({match['mode']}, "
+                          f"{match['records']} record(s), last seen "
+                          f"{match['seen_at'][:10]})")
+                return 0
+            matches = exact
+
+        name = matches[0]["name"]
+        records = database.history(connection, name)
+        print(f"{name} - {len(records)} observation(s)\n")
+        header = (f"  {'Seen':<12} {'Mode':<10} {'Pos':<4} {'Age':>3} "
+                  f"{'Grade':>6} {'WAR':>6} {'Scouting':<12} Ratings")
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        for row in records:
+            ratings = database.to_ratings(row)
+            shown = " ".join(f"{k} {v}" for k, v in list(ratings.items())[:6])
+            print(f"  {row['seen_at'][:10]:<12} {row['mode']:<10} "
+                  f"{(row['position'] or ''):<4} "
+                  f"{(row['age'] if row['age'] is not None else ''):>3} "
+                  f"{(row['grade'] if row['grade'] is not None else 0):>6.0f} "
+                  f"{(row['war'] if row['war'] is not None else 0):>6.2f} "
+                  f"{(row['scouting_accuracy'] or ''):<12} {shown}")
+
+        # Movement between the first and last look is the reason to keep history.
+        if len(records) > 1:
+            first, last = records[0], records[-1]
+            if first["grade"] is not None and last["grade"] is not None:
+                print(f"\n  Grade {first['grade']:.0f} -> {last['grade']:.0f} "
+                      f"({last['grade'] - first['grade']:+.0f}) between "
+                      f"{first['seen_at'][:10]} and {last['seen_at'][:10]}")
+            if first["war"] is not None and last["war"] is not None:
+                print(f"  WAR   {first['war']:.2f} -> {last['war']:.2f} "
+                      f"({last['war'] - first['war']:+.2f})")
+        return 0
+    finally:
+        connection.close()
+
+
+def command_report(args: argparse.Namespace) -> int:
+    connection = database.connect(args.db)
+    try:
+        mode = args.mode
+        if mode is None:
+            counts = {}
+            for row in database.latest(connection):
+                counts[row["mode"]] = counts.get(row["mode"], 0) + 1
+            if not counts:
+                print("The database is empty. Run `flag` first.",
+                      file=sys.stderr)
+                return 1
+            mode = max(counts, key=counts.get)
+            if len(counts) > 1:
+                print(f"NOTE: the database holds "
+                      + ", ".join(f"{n} {m}" for m, n in sorted(counts.items()))
+                      + f". Using {mode} - pass --mode to choose.",
+                      file=sys.stderr)
+        rows = database.latest(connection, mode=mode, role=args.role)
+    finally:
+        connection.close()
+
+    subjects = _subjects_from_rows(rows)
+    if len(subjects) < MIN_MATCHES:
+        print(f"error: only {len(subjects)} usable {mode} player(s) in the "
+              "database - not enough to fit against.", file=sys.stderr)
+        return 1
+
+    analysis = flagging.analyze(subjects, degree=args.degree,
+                                split_by_role=not args.pool,
+                                position_adjust=args.position_adjust)
+    findings = flagging.select(analysis.findings, limit=args.limit,
+                               min_z=args.min_z)
+    grade_label = "POT" if mode == views.POTENTIAL else "OVR"
+
+    print(f"Database report: {len(subjects)} players, {mode} ratings, "
+          f"refitted together")
+    for fit in analysis.fits:
+        print(f"  fit[{fit.group}] n={fit.count} slope={fit.slope:+.4f} "
+              f"WAR per grade point, residual sd={fit.residual_sd:.2f}"
+              + (f" ({fit.note})" if fit.note else ""))
+        offsets = fit.position_offsets
+        if offsets:
+            shown = ", ".join(f"{name} {value:+.2f}" for name, value
+                              in sorted(offsets.items(), key=lambda p: -p[1]))
+            print(f"    position offsets vs {fit.reference_position}: {shown}")
+    print()
+
+    if findings:
+        print("MOST UNDERRATED - projecting above what their grade implies")
+        print(_format_table(findings, grade_label))
+
+    overrated = []
+    if args.overrated > 0:
+        overrated = flagging.select_overrated(analysis.findings,
+                                              limit=args.overrated)
+        if overrated:
+            print("\nMOST OVERRATED - projecting below what their grade implies")
+            print(_format_table(overrated, grade_label))
+
+    if args.out:
+        rating_columns = sorted({key for s in subjects for key in s.ratings})
+        if args.out.lower().endswith((".xlsx", ".xlsm")):
+            try:
+                spreadsheet.write_xlsx(args.out, analysis.findings,
+                                       analysis.fits, grade_label=grade_label,
+                                       strong_z=args.highlight_z,
+                                       rating_columns=rating_columns)
+            except (spreadsheet.SpreadsheetUnavailable, OSError) as error:
+                print(f"error writing {args.out}: {error}", file=sys.stderr)
+                return 1
+        else:
+            _write_csv(args.out, analysis.findings)
+        print(f"\nWrote all {len(analysis.findings)} players to {args.out}")
+    return 0
+
+
+def command_stats(args: argparse.Namespace) -> int:
+    connection = database.connect(args.db)
+    try:
+        summary = database.stats(connection)
+    finally:
+        connection.close()
+    path = args.db or database.default_path()
+    print(f"Database: {path}")
+    if not summary["observations"]:
+        print("  empty - run `flag` to record a pool")
+        return 0
+    print(f"  {summary['players']} players, {summary['observations']} "
+          f"observations")
+    print(f"  first seen {summary['first_seen'][:10]}, "
+          f"last seen {summary['last_seen'][:10]}")
+    for mode, role, players in summary["by_mode"]:
+        print(f"    {mode:<10} {role:<8} {players} players")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "prepare":
         return command_prepare(args)
+    if args.command == "lookup":
+        return command_lookup(args)
+    if args.command == "report":
+        return command_report(args)
+    if args.command == "stats":
+        return command_stats(args)
     return command_flag(args)
 
 
