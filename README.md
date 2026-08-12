@@ -48,7 +48,19 @@ The first `latest` is the newest report, the second is the newest
 If the two do not correspond, `flag` says so rather than ranking the handful
 of names that happened to overlap.
 
-Or double-click **`OOTP-Scout.bat`**, which walks through all of the above.
+Or double-click **`OOTP-Scout.bat`**, which walks through all of the above and
+returns to a menu afterwards rather than closing:
+
+```
+  [1]  Full run       export -> calculator -> spreadsheet
+  [2]  Prepare only   read the export, copy the paste block
+  [3]  Results only   you have already downloaded the CSV
+  [4]  Results, prospects   same, but graded against POT
+  [Q]  Quit
+```
+
+Option 3 is the useful one when you want to re-run the analysis with the CSV you
+already have — no need to redo the export or the paste.
 
 HTML, TSV and CSV are all accepted wherever a report is expected, so if you
 prefer to select the table in the browser and copy it yourself, paste it into a
