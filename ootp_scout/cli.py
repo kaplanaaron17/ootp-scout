@@ -149,6 +149,23 @@ def build_parser() -> argparse.ArgumentParser:
         "stats", help="what the database currently holds")
     stats.add_argument("--db", default=None)
 
+    compare = subparsers.add_parser(
+        "compare", help="weigh two sides of a hypothetical trade")
+    compare.add_argument("side_a", metavar="SIDE-A",
+                         help="comma-separated player names")
+    compare.add_argument("side_b", metavar="SIDE-B",
+                         help="comma-separated player names")
+    compare.add_argument("--league", default=None)
+    compare.add_argument("--mode", choices=("current", "potential"),
+                         default=None,
+                         help="value on current ratings or on potential")
+    compare.add_argument("--degree", type=int, default=1)
+    compare.add_argument("--pool", action="store_true")
+    compare.add_argument("--no-position", dest="position_adjust",
+                         action="store_false")
+    compare.set_defaults(position_adjust=True)
+    compare.add_argument("--db", default=None)
+
     leagues = subparsers.add_parser(
         "leagues", help="list the leagues in the database")
     leagues.add_argument("--db", default=None)
@@ -725,6 +742,124 @@ def command_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _split_names(text: str) -> list[str]:
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def command_compare(args: argparse.Namespace) -> int:
+    """Two packages of players, measured against the same fit.
+
+    Without contract data this cannot report surplus value, so it reports what
+    it can defend: projected production, and how far each player sits from the
+    grade an opponent is probably pricing him by. That gap is the edge - a
+    player whose projection beats his grade is one the other side will let go
+    cheaply.
+    """
+    connection = database.connect(args.db)
+    try:
+        league = resolve_league(connection, args.league)
+        if league is None:
+            return 1
+        mode = args.mode
+        if mode is None:
+            counts = {}
+            for row in database.latest(connection, league=league):
+                counts[row["mode"]] = counts.get(row["mode"], 0) + 1
+            if not counts:
+                print(f"Nothing recorded for league {league!r}.",
+                      file=sys.stderr)
+                return 1
+            mode = max(counts, key=counts.get)
+        rows = database.latest(connection, mode=mode, league=league)
+    finally:
+        connection.close()
+
+    subjects = _subjects_from_rows(rows)
+    if len(subjects) < MIN_MATCHES:
+        print(f"error: only {len(subjects)} usable player(s) in {league!r} - "
+              "not enough to measure anyone against.", file=sys.stderr)
+        return 1
+
+    analysis = flagging.analyze(subjects, degree=args.degree,
+                                split_by_role=not args.pool,
+                                position_adjust=args.position_adjust)
+    by_name = {f.subject.name.strip().lower(): f for f in analysis.findings}
+
+    def resolve(names: list[str]) -> tuple[list, list[str]]:
+        found, missing = [], []
+        for name in names:
+            key = name.strip().lower()
+            if key in by_name:
+                found.append(by_name[key])
+                continue
+            partial = [f for k, f in by_name.items() if key in k]
+            if len(partial) == 1:
+                found.append(partial[0])
+            else:
+                missing.append(name)
+        return found, missing
+
+    side_a, missing_a = resolve(_split_names(args.side_a))
+    side_b, missing_b = resolve(_split_names(args.side_b))
+    for name in missing_a + missing_b:
+        print(f"error: no single player in {league!r} matches {name!r}. "
+              "Try `lookup` to find the exact name.", file=sys.stderr)
+    if missing_a or missing_b:
+        return 1
+    if not side_a and not side_b:
+        print("error: name at least one player on one side.", file=sys.stderr)
+        return 1
+
+    grade_label = "POT" if mode == views.POTENTIAL else "OVR"
+    print(f"{league} - valued on {mode} ratings, fitted across "
+          f"{len(subjects)} players\n")
+
+    def show(title: str, findings: list) -> tuple[float, float]:
+        print(title)
+        if not findings:
+            print("  (nobody)")
+            return 0.0, 0.0
+        header = (f"  {'Player':<24} {'Pos':<4} {'Age':>3} {grade_label:>5} "
+                  f"{'Impl':>5} {'WAR':>6} {'Diff':>7}")
+        print(header)
+        print("  " + "-" * (len(header) - 2))
+        war = surplus_gap = 0.0
+        for finding in findings:
+            subject = finding.subject
+            implied = ("-" if finding.implied_grade is None
+                       else f"{finding.implied_grade:.0f}")
+            print(f"  {subject.name[:24]:<24} {subject.position[:4]:<4} "
+                  f"{subject.meta.get('age', ''):>3} {subject.grade:>5.0f} "
+                  f"{implied:>5} {subject.war:>6.2f} "
+                  f"{finding.residual:>+7.2f}")
+            war += subject.war
+            surplus_gap += finding.residual
+        print(f"  {'TOTAL':<24} {'':<4} {'':>3} {'':>5} {'':>5} "
+              f"{war:>6.2f} {surplus_gap:>+7.2f}")
+        return war, surplus_gap
+
+    war_a, gap_a = show("YOU GIVE UP", side_a)
+    print()
+    war_b, gap_b = show("YOU RECEIVE", side_b)
+
+    print(f"\n{'':-<60}")
+    print(f"Projected WAR      {war_b - war_a:+.2f} in your favour"
+          if war_b >= war_a else
+          f"Projected WAR      {war_b - war_a:+.2f} against you")
+    print(f"Versus the grades  {gap_b - gap_a:+.2f} wins")
+    if gap_b > gap_a:
+        print("  You are receiving the players the grades underrate more, so "
+              "an opponent pricing by OVR should find this easy to accept.")
+    elif gap_b < gap_a:
+        print("  You are giving up the players the grades underrate more - "
+              "cheap by the opponent's pricing, but the ones worth keeping.")
+
+    print("\nNo salaries or contract lengths are recorded, so this is "
+          "production only, not surplus value. A cheap young player and an "
+          "expensive old one with the same projection look identical here.")
+    return 0
+
+
 def command_leagues(args: argparse.Namespace) -> int:
     connection = database.connect(args.db)
     try:
@@ -790,6 +925,8 @@ def main(argv: list[str] | None = None) -> int:
         return command_report(args)
     if args.command == "stats":
         return command_stats(args)
+    if args.command == "compare":
+        return command_compare(args)
     if args.command == "leagues":
         return command_leagues(args)
     if args.command == "forget":

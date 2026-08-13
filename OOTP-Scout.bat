@@ -32,6 +32,7 @@ echo     [5]  League report   spreadsheet of one league
 echo     [6]  Prospect report same, graded against POT
 echo     [7]  What is stored
 echo     [8]  List leagues
+echo     [9]  Test a trade
 echo.
 echo     [Q]  Quit
 echo ----------------------------------------------------------------
@@ -46,6 +47,7 @@ if /i "%pick%"=="5" goto LEAGUE
 if /i "%pick%"=="6" goto PROSPECTS
 if /i "%pick%"=="7" goto STATS
 if /i "%pick%"=="8" goto LEAGUES
+if /i "%pick%"=="9" goto TRADE
 if /i "%pick%"=="q" goto QUIT
 
 REM A stray Enter should just redraw the menu, but if input has gone away
@@ -115,6 +117,19 @@ goto DONE
 :LEAGUES
 echo.
 python -m ootp_scout leagues
+goto DONE
+
+
+:TRADE
+echo.
+echo  Name the players on each side, separated by commas.
+echo.
+set "give="
+set /p "give=You give up: "
+set "get="
+set /p "get=You receive: "
+echo.
+python -m ootp_scout compare "%give%" "%get%"
 goto DONE
 
 

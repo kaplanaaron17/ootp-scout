@@ -447,6 +447,96 @@ class DatabaseCommandTest(unittest.TestCase):
         self.assertIn("72 observations", out)
 
 
+class CompareCommandTest(unittest.TestCase):
+    """Weighing two sides of a hypothetical trade."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.db = os.path.join(self.folder.name, "trade.db")
+        run(["flag", REPORT, PROJECTIONS, "--overrated", "0",
+             "--league", "Top Shelf", "--db", self.db])
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def _compare(self, a, b, *extra):
+        return run(["compare", a, b, "--db", self.db, *extra])
+
+    def test_both_sides_are_listed_with_totals(self):
+        code, out, _ = self._compare("Sleeper Sam", "Player 02")
+        self.assertEqual(code, 0)
+        self.assertIn("YOU GIVE UP", out)
+        self.assertIn("YOU RECEIVE", out)
+        self.assertIn("Sleeper Sam", out)
+        self.assertIn("Player 02", out)
+        self.assertEqual(out.count("TOTAL"), 2)
+
+    def test_multiple_players_a_side(self):
+        _, out, _ = self._compare("Sleeper Sam, Player 15",
+                                  "Player 02, Player 28")
+        for name in ("Sleeper Sam", "Player 15", "Player 02", "Player 28"):
+            self.assertIn(name, out)
+
+    def test_the_side_with_more_projection_is_named(self):
+        _, out, _ = self._compare("Player 15", "Sleeper Sam")
+        self.assertIn("in your favour", out)
+
+    def test_receiving_less_projection_is_named_too(self):
+        _, out, _ = self._compare("Sleeper Sam", "Player 15")
+        self.assertIn("against you", out)
+
+    def test_the_grade_gap_is_reported_separately_from_war(self):
+        """Winning on production and losing on value is the interesting case."""
+        _, out, _ = self._compare("Sleeper Sam", "Player 02, Player 28")
+        self.assertIn("Projected WAR", out)
+        self.assertIn("Versus the grades", out)
+
+    def test_it_says_plainly_that_this_is_not_surplus_value(self):
+        _, out, _ = self._compare("Sleeper Sam", "Player 02")
+        self.assertIn("not surplus value", out)
+
+    def test_partial_names_resolve(self):
+        code, out, _ = self._compare("sleeper", "Player 02")
+        self.assertEqual(code, 0)
+        self.assertIn("Sleeper Sam", out)
+
+    def test_an_unknown_player_fails_with_a_pointer(self):
+        code, _, err = self._compare("Nobody At All", "Player 02")
+        self.assertEqual(code, 1)
+        self.assertIn("Nobody At All", err)
+        self.assertIn("lookup", err)
+
+    def test_an_ambiguous_name_is_refused_rather_than_guessed(self):
+        code, _, err = self._compare("Player 0", "Player 02")
+        self.assertEqual(code, 1)
+        self.assertIn("no single player", err)
+
+    def test_a_one_sided_giveaway_is_allowed(self):
+        code, out, _ = self._compare("Sleeper Sam", "")
+        self.assertEqual(code, 0)
+        self.assertIn("(nobody)", out)
+
+    def test_naming_nobody_at_all_is_refused(self):
+        code, _, err = self._compare("", "")
+        self.assertEqual(code, 1)
+        self.assertIn("at least one player", err)
+
+    def test_it_will_not_span_leagues(self):
+        run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS, "--overrated", "0",
+             "--league", "Sim Nation", "--db", self.db])
+        code, _, err = self._compare("Sleeper Sam", "Player 02")
+        self.assertEqual(code, 1)
+        self.assertIn("never combined", err)
+
+    def test_a_player_from_another_league_is_not_found(self):
+        run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS, "--overrated", "0",
+             "--league", "Sim Nation", "--db", self.db])
+        code, _, err = self._compare("Sleeper Sam", "Ace Sleeper",
+                                     "--league", "Top Shelf")
+        self.assertEqual(code, 1)
+        self.assertIn("Ace Sleeper", err)
+
+
 class MultiLeagueTest(unittest.TestCase):
     """Two leagues on different rating scales must never share a fit."""
 

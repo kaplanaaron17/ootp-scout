@@ -59,13 +59,15 @@ returns to a menu afterwards rather than closing:
 
   USE THE DATABASE
     [4]  Look up a player
-    [5]  League report   spreadsheet of everything held
+    [5]  League report   spreadsheet of one league
     [6]  Prospect report same, graded against POT
     [7]  What is stored
+    [8]  List leagues
+    [9]  Test a trade
 ```
 
 Recording a pool no longer writes a spreadsheet. Everything accumulates in the
-database, and options 5 and 6 build a sheet from all of it when you want one.
+database, and options 5 and 6 build a sheet from it when you want one.
 
 HTML, TSV and CSV are all accepted wherever a report is expected, so if you
 prefer to select the table in the browser and copy it yourself, paste it into a
@@ -150,6 +152,33 @@ whatever you ask for. Query the whole league and you get a league-wide fit;
 Re-running the same export on the same day corrects that day's record rather
 than piling up duplicates; a run on a later date is a genuinely new
 observation. `--no-save` skips recording entirely.
+
+## Testing a trade
+
+```bash
+python -m ootp_scout compare "Sleeper Sam, Player 15" "Player 02, Player 28"
+```
+
+Names are comma-separated, partial names resolve, and an ambiguous one is
+refused rather than guessed. Both sides are measured against the same fit:
+
+```
+Projected WAR      +5.50 in your favour
+Versus the grades  -2.13 wins
+  You are giving up the players the grades underrate more - cheap by the
+  opponent's pricing, but the ones worth keeping.
+```
+
+Two numbers because they answer different questions. **Projected WAR** is who
+gets more production. **Versus the grades** is the arbitrage: an opponent
+pricing by OVR — as the in-game trade value does — will happily give up players
+whose projection beats their grade, and overcharge for the reverse. Winning the
+first and losing the second means you took the deal the other side wanted.
+
+**This is production, not surplus value.** No salaries or contract lengths are
+recorded, so a cheap 23-year-old and an expensive 34-year-old with the same
+projection look identical. Adding the contract columns to your OOTP view is
+what closes that gap.
 
 ## Multiple leagues
 
