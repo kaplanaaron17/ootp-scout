@@ -1,372 +1,142 @@
 # ootp-scout
 
-Finds OOTP players whose WAR projection outruns their scouting grade — the ones
-the OVR/POT number underrates. WAR comes from
-[ootpcalculator.com](https://ootpcalculator.com); this tool prepares the input,
-then ranks the output by how far each player beats his grade.
+Finds baseball players whose projected production outruns the scouting grade
+attached to them — the ones a league's own valuation underrates.
 
-Two systems, one per grade column:
-
-- **Players to target** — current ratings vs **OVR**
-- **Prospects** — potential ratings vs **POT**
-
-Which one you get is determined by the OOTP view you export; the tool detects it.
-
-Standard library only, except that writing `.xlsx` uses `openpyxl` if you
-have it. CSV output needs nothing at all.
-
-## Workflow
-
-The calculator is a website with no API, so there is one manual paste in the
-middle. It is per *pool*, not per player — a few clicks for a whole draft class.
-
-In OOTP: pick your player list, switch to one of the ratings views below, then
-**Report → Write report to disk**. OOTP does not prompt for a location — it
-writes a timestamped file into the save's own folder and opens it in your
-browser, which you can ignore. So just ask for the newest one:
-
-```bash
-python -m ootp_scout prepare --latest
-```
-
-This reads OOTP's HTML directly, works out the rating scale, checks the export
-against what the calculator accepts, and puts the paste block **on your
-clipboard**. Then:
-
-1. Open the [batter](https://ootpcalculator.com/batter-projections) or
-   [pitcher](https://ootpcalculator.com/pitcher-projections) projections page
-2. Set **RATINGS SCALE** to the scale `prepare` reported, then click **BATCH INPUT**
-3. **Ctrl+V**, click **SUBMIT**
-4. Click **DOWNLOAD CSV**
-
-```bash
-python -m ootp_scout flag latest latest --out targets.xlsx
-```
-
-The first `latest` is the newest report, the second is the newest
-`*-projections*.csv` in your Downloads. A path works anywhere `latest` does.
-If the two do not correspond, `flag` says so rather than ranking the handful
-of names that happened to overlap.
-
-Or double-click **`OOTP-Scout.bat`**, which walks through all of the above and
-returns to a menu afterwards rather than closing:
+Built for [Out of the Park Baseball](https://www.ootpdevelopments.com/), a
+simulation game whose in-game trade values are priced off a single overall
+rating. That rating is a lossy summary of a player's underlying tools, so it
+misprices players systematically. This tool finds the gap and puts a number
+on it.
 
 ```
-  ADD TO THE DATABASE
-    [1]  Full run        export -> calculator -> database
-    [2]  Prepare only    read the export, copy the paste block
-    [3]  Record only     you have already downloaded the CSV
-
-  USE THE DATABASE
-    [4]  Look up a player
-    [5]  League report   spreadsheet of one league
-    [6]  Prospect report same, graded against POT
-    [7]  What is stored
-    [8]  List leagues
-    [9]  Test a trade
-```
-
-Recording a pool no longer writes a spreadsheet. Everything accumulates in the
-database, and options 5 and 6 build a sheet from it when you want one.
-
-HTML, TSV and CSV are all accepted wherever a report is expected, so if you
-prefer to select the table in the browser and copy it yourself, paste it into a
-`.tsv` and pass that instead. `--no-copy` skips the clipboard step.
-
-`capture.ps1` wraps the same thing and can read the clipboard as input, but
-Windows blocks `.ps1` files by default (`running scripts is disabled on this
-system`). The Python commands above need no such permission, so prefer them.
-
-Output:
-
-```
-View: Batting Ratings   Grade column: OVR   Matched: 41 of 41 players
-  fit[hitters] n=41 slope=+0.2201 WAR per grade point, residual sd=1.64
-    position offsets vs C: CF +2.24, SS +1.51, 3B +0.69, 2B -0.41, RF -0.60, 1B -0.89
-
 MOST UNDERRATED - projecting above what their grade implies
   #  Player                   Pos  Age   OVR  Impl   +/-    WAR    Exp   Diff     z  Scouting
----------------------------------------------------------------------------------------------
   1  Sleeper Sam              CF    20    35    72   +37   7.30  -0.75  +8.05  4.92  Low
   2  Player 00                RF    28    55    62    +7   2.30   0.82  +1.48  0.91  High
-  3  Player 26                C     21    55    60    +5   2.60   1.41  +1.19  0.73  High
 ```
 
-Name the output `.xlsx` and you get a formatted spreadsheet instead of a CSV.
-It holds **every player in the pool**, best differential first, with each
-player's tool ratings alongside the analysis columns — so it doubles as a
-scouting sheet you can filter and sort. Rows are tinted in both directions:
+*OVR 35, but his projection implies a 72.*
 
-| Colour | Meaning |
-| --- | --- |
-| Green | Underrated, z ≥ 2.0 |
-| Amber | Underrated, z ≥ 1.0 |
-| Peach | Overrated, z ≤ −1.0 |
-| Red | Overrated, z ≤ −2.0 |
-| None | Within a standard deviation — grade and projection agree |
+Standard library only — no install step. `openpyxl` is used for spreadsheet
+output if present; everything else works without it. Developed and tested on
+Python 3.14.
 
-`--limit` only trims the tables printed to the terminal; the sheet always keeps
-everyone, because the uncoloured middle is what makes the highlighted extremes
-legible. `--highlight-z` moves the strong threshold. A second sheet records the
-fitted line, the position offsets and the thresholds, so the numbers can be
-argued with rather than just trusted. Writing `.xlsx` needs `openpyxl`; a `.csv`
-name stays dependency-free.
+## What it does
 
-## The database
+1. Reads a player export straight out of the game's HTML report
+2. Prepares it for [ootpcalculator.com](https://ootpcalculator.com), which
+   converts ratings into projected season stats and WAR
+3. Joins the projections back onto the export
+4. **Fits projected WAR against the scouting grade across the whole pool, and
+   ranks by residual** — how far each player sits above the WAR his grade
+   predicts
+5. Accumulates it all in a local database you can query during a trade
 
-Every `flag` run records what it saw into `ootp_scout.db` (SQLite, standard
-library, gitignored). Over a save this accumulates into a reference you can
-consult instead of regenerating a spreadsheet each time.
+Step 4 is the point. Ranking by raw projected WAR just re-lists the players
+everyone already knows are good. The residual finds the *mispriced* ones.
+
+## Quick start
 
 ```bash
-python -m ootp_scout lookup "Sleeper Sam"     # one player, with his history
-python -m ootp_scout report --out league.xlsx # rank everything held
-python -m ootp_scout stats                    # what is in there
+python -m ootp_scout prepare --latest        # reads the newest game export
+# paste into the calculator, download its CSV
+python -m ootp_scout flag latest latest      # join, rank, record
+python -m ootp_scout lookup "Ted Williams"   # consult during a trade
+python -m ootp_scout compare "A, B" "C"      # weigh a hypothetical trade
 ```
 
-```bash
-python -m ootp_scout report --team louisville    # one organisation
-python -m ootp_scout report --role pitcher       # arms only
-```
+`OOTP-Scout.bat` wraps all of it in a menu for people who would rather not use
+a terminal. Full operational detail is in [USAGE.md](USAGE.md).
 
-`--team` matches partially and ignores case, so `louisville` finds whatever
-OOTP actually writes. It needs an organisation column in your export — add
-`ORG` or `TM` to the view and it is picked up automatically; `stats` lists the
-organisations held. Fitting inside one organisation says so, because a
-fourteen-player baseline is far noisier than a league-wide one and the
-resulting numbers are not comparable with a full-league run.
+## Design decisions
 
-`lookup` takes a partial name and lists candidates if more than one matches.
-When a player has been seen more than once it shows how his grade and
-projection moved between the first look and the latest — in a save played over
-seasons, that movement is the part no single snapshot can give you.
+**The model is fitted per pool, not hard-coded.** Nothing assumes a fixed
+relationship between grade and WAR. Each run regresses WAR on the grade across
+whoever is present and measures residuals against that. Different leagues,
+rating scales and run environments therefore need no configuration.
 
-**What is stored is observations, not rankings.** A residual is measured
-against whoever else was in that run, so a +2.0 inside a 41-player draft class
-and a +2.0 across 800 league players are not the same claim. Storing both in
-one table would invite comparing them. Instead the database keeps the raw facts
-— grade, projected WAR, ratings, age, on a date — and `report` refits across
-whatever you ask for. Query the whole league and you get a league-wide fit;
-`--role pitcher` fits only arms.
+**Position is a term in the fit, not a separate model.** Each position gets its
+own intercept shift while sharing one slope. Fitting each position separately
+would put four data points behind a designated hitter's baseline; a shared
+slope with a per-position offset is one well-supported number instead. On real
+data this dropped residual spread from 1.90 to 1.64 and materially reordered
+the results.
 
-Re-running the same export on the same day corrects that day's record rather
-than piling up duplicates; a run on a later date is a genuinely new
-observation. `--no-save` skips recording entirely.
+**The database stores observations, not rankings.** A residual is only
+meaningful against the pool it was computed in — a +2.0 inside a 41-player
+draft class is not a +2.0 across 800 league players. Storing rankings would
+invite comparing incomparable numbers, so the store keeps raw facts and every
+query refits. Observations are kept rather than overwritten, so players
+accumulate a history across seasons.
 
-## Testing a trade
+**Leagues are never combined, and the tool refuses to guess between them.**
+Every other ambiguity here picks a sensible default and says so. This one asks,
+because a fit spanning a 20-80 league and a 1-100 league produces a ranking
+that looks completely normal and means nothing.
 
-```bash
-python -m ootp_scout compare "Sleeper Sam, Player 15" "Player 02, Player 28"
-```
+**The site's contract is derived from its own code, not guessed.** The
+calculator accepts exactly four export layouts, which the tool matches
+verbatim. That resolves ambiguities no heuristic could: `CON` means Contact in
+the batting views and Control in the pitching views, and only the view
+disambiguates it.
 
-Names are comma-separated, partial names resolve, and an ambiguous one is
-refused rather than guessed. Both sides are measured against the same fit:
+## Notable problems solved
 
-```
-Projected WAR      +5.50 in your favour
-Versus the grades  -2.13 wins
-  You are giving up the players the grades underrate more - cheap by the
-  opponent's pricing, but the ones worth keeping.
-```
+- **Rating scale detection.** The game exports on either a 20-80 or 1-100
+  scale, and the calculator must be told which. It is inferred from the data:
+  20-80 rounds to grades, so every value lands on a multiple of five, while
+  1-100 produces off-grid values immediately. Real exports then showed ratings
+  *above* the nominal 20-80 ceiling — a 90 Stealing — so the detector matches
+  the calculator's actual limit rather than the nominal one.
+- **Runs-allowed WAR for pitchers.** The calculator's WAR sits beside FIP, so
+  it is fielding-independent. Its output also carries innings and runs, which
+  is enough to compute the runs-allowed flavour alongside it. The replacement
+  baseline is solved so the pool's mean matches, putting both on one scale by
+  construction — the per-pitcher disagreement is the signal, and a level shift
+  would only obscure it.
+- **Mismatched inputs.** Pairing a report with projections from a different
+  export used to fit a line through whatever few names overlapped and present
+  it as a ranking. It now refuses below five matches and names both files.
 
-Two numbers because they answer different questions. **Projected WAR** is who
-gets more production. **Versus the grades** is the arbitrage: an opponent
-pricing by OVR — as the in-game trade value does — will happily give up players
-whose projection beats their grade, and overcharge for the reverse. Winning the
-first and losing the second means you took the deal the other side wanted.
-
-**This is production, not surplus value.** No salaries or contract lengths are
-recorded, so a cheap 23-year-old and an expensive 34-year-old with the same
-projection look identical. Adding the contract columns to your OOTP view is
-what closes that gap.
-
-## Multiple leagues
-
-If you play in several online leagues, each is kept separate:
-
-```bash
-python -m ootp_scout leagues                        # what is held
-python -m ootp_scout report --league "Sim Nation"   # one league
-python -m ootp_scout forget "Old League"            # remove one
-```
-
-The league is taken from the save the report came out of — OOTP writes reports
-inside `saved_games/<save>.lg/`, so it identifies itself and you need not say.
-`--league` overrides when a report has been moved somewhere else.
-
-**Leagues are never combined, and `report` refuses to guess between them.**
-Each has its own talent pool and run environment, and they may run different
-rating scales — a 55 on 20-80 is not a 55 on 1-100. A fit spanning both would
-be meaningless, and the output would look perfectly normal, so the tool asks
-rather than picking. With a single league in the database no flag is needed.
-
-The scale is recorded per league, and `leagues` shows it. `forget` deletes a
-league and everything recorded for it; it asks you to type the name to confirm,
-or takes `--yes`.
-
-## rWAR, for pitchers
-
-The calculator reports one WAR for pitchers, sitting next to FIP — so it is the
-fielding-independent kind, built from strikeouts, walks and home runs. Its
-output also carries **IP** and **R**, which is everything a runs-allowed WAR
-needs, so pitcher runs show an **rWAR** column and the **rWAR − WAR** gap
-beside it.
-
-Where they disagree is the point. A pitcher whose rWAR trails his WAR gave up
-more runs than his peripherals imply — usually his BABIP or home-run rate doing
-the damage rather than his strikeout and walk skills. In the fixture pool, Ace
-Sleeper projects 9.10 WAR but 7.80 rWAR.
-
-Runs-above-replacement needs a replacement baseline, which the calculator does
-not expose. Rather than import a number from a different run environment, the
-baseline is solved so the pool's mean rWAR equals its mean WAR. The two columns
-then sit on one scale by construction and the per-pitcher gap is not
-contaminated by a level shift. **This is pool-relative and is not
-Baseball-Reference's rWAR** — do not quote it as one.
-
-The columns appear only when the projections carry innings, so batter runs are
-unaffected.
-
-## The implied grade
-
-Beside each player's actual grade sits the grade his projection *implies* —
-the same fitted line read backwards. Instead of "this player is +8.05 wins
-above expectation", it says **OVR 35, implied 72**, which is the gap stated in
-the units the grade is written in.
-
-```
-  #  Player                   Pos  Age   OVR  Impl   +/-    WAR    Exp   Diff     z  Scouting
-  1  Sleeper Sam              CF    20    35    72   +37   7.30  -0.75  +8.05  4.92  Low
-```
-
-It undoes the position offset too, so two players with the same WAR at
-different positions imply different grades — exactly as they should.
-
-Two caveats. It can land outside the rating scale: a dreadful projection on a
-20-80 save can imply a grade below 20, because the line keeps going where the
-scale stops. And it is blank when the fit has no grade term at all (a pool where
-every grade is identical), since then every grade implies the same WAR and the
-question has no answer.
-
-## Both ends of the ranking
-
-Both ends of the ranking are printed. **Most underrated** are the players to
-target; **most overrated** are the same fit read downwards — players projecting
-below what their grade implies, which is who to trade away or stop paying up
-for. `--overrated N` sets how many appear in the terminal (default 10; `0`
-turns it off). The spreadsheet shows both ends by colour on one sheet.
-
-Useful flags on `flag`: `--limit`, `--min-z 1.5`, `--degree 2` (fit a curve),
-`--pool` (fit hitters and pitchers together), `--no-position`.
-
-## Getting the export out of OOTP
-
-In OOTP, find the players you want, switch to one of these four views, then
-**Report → Write report to disk**. The calculator accepts exactly these column
-sets and nothing else:
-
-| View | Grade | Ratings |
-| --- | --- | --- |
-| Batting Ratings | OVR | CON, GAP, POW, EYE, K's, CON/POW vL/vR, BUN, BFH, SPE, STE, DEF |
-| Batting Ratings (potential) | POT | CON P, GAP P, POW P, EYE P, K P, SPE, STE, RUN, DEF |
-| Pitching Ratings | OVR | STU, MOV, CON, STU vL/vR, VELO, STM, G/F, HLD |
-| Pitching Ratings (potential) | POT | STU P, MOV P, CON P, VELO, STM, G/F, HLD |
-
-All four also want `POS, #, Name, Inf, Age, B, T, SctAcc`, and optionally
-`BABIP`/`SR` for batters or `HRA`/`BABIP` for pitchers. Extra columns and the
-sort-arrow glyph on the sorted column are tolerated.
-
-The **default draft-pool view will not work** — it exports OVR and POT and no
-underlying ratings, so there is nothing to project from. `prepare` says so and
-names the view you want instead.
-
-### Custom views, and pages that will not take a view
-
-Some OOTP pages (the organization view among them) have a fixed layout and will
-not let you pick a ratings view. Use a page that does — a player list filtered
-to the organization, minors included — and build a **custom view** with the
-columns above. Extra columns are tolerated, so one custom view can hold
-everything you like.
-
-If a custom view carries current *and* potential ratings, both definitions match
-and the tool says so, defaulting to current:
-
-```
-NOTE: this export carries both current and potential ratings. Using current - pass --mode to choose the other.
-```
-
-`--mode potential` (or `--mode current`) picks. That means one export can feed
-both analyses: run `prepare`/`flag` once per mode, pasting each into the
-calculator separately.
-
-### Rating scales
-
-The scale is detected from the ratings themselves and printed — match the
-site's RATINGS SCALE dropdown to what it says. `--scale` overrides it.
-
-The tell is arithmetic: OOTP's 20-80 display rounds to the nearest grade, so
-every rating lands on a multiple of 5, while a 1-100 export produces off-grid
-values almost immediately. Note that OOTP shows some ratings above the nominal
-top of the 20-80 scale — a 90 Stealing turns up in real exports — so the
-detector allows up to 95, matching the calculator's own limit.
-
-If you have a choice, 1-100 carries more resolution than 20-80 and makes the
-residual ranking finer — a 20-80 pool puts many players on identical grades,
-which flattens the fit. It is a marginal gain, not a reason to change a save
-you are happy with.
-
-## How the flagging works
-
-Ranking by projected WAR would just re-list the players you already know are
-good. Instead the tool fits projected WAR against the grade across the whole
-pool, then ranks by **residual** — how far a player sits above the WAR his grade
-predicts.
-
-Two things are held constant while measuring that gap:
-
-- **Role** — hitters and pitchers are fit separately; their WAR distributions
-  differ enough that pooling them leaks one group's shape into the other's
-  residuals. `--pool` overrides.
-- **Position** — each position gets its own intercept shift, so a catcher is
-  measured against catchers. Positions share one slope, which is what makes
-  this survive thin positions: fitting DH separately on four players would be
-  noise, but a DH offset on a shared slope is one well-supported number. A
-  position needs at least 4 players to earn an offset; below that the player is
-  measured against the group's reference position. `--no-position` overrides.
-
-The fitted offsets are printed each run and recorded in the spreadsheet, so you
-can see what the adjustment actually did.
-
-`z_score` is the residual in standard deviations, so it is comparable across
-runs and across pools of different sizes. If the grade is constant across a
-group (a draft pool where everyone's POT is 80), the fit falls back to the group
-mean and every row is annotated saying so.
-
-**Scouting accuracy is reported, never filtered on.** Every flagged player
-carries his `SctAcc` into the output, so a hit off a Low-accuracy report is
-visible as one and you can discount it yourself.
-
-## Things that will bite you
-
-- **`CON` means Contact in the batter views and Control in the pitcher views.**
-  The column name alone is ambiguous, which is why parsing is view-based rather
-  than column-based.
-- **The calculator's CSV is not quoted.** It joins fields with commas, so a
-  player whose name contains a comma splits into an extra column. `flag` reports
-  those rows by line number instead of dropping them silently.
-- **Joins are by name.** Duplicate names are dropped and reported rather than
-  resolved by guessing.
-- The calculator states it is tuned for 2026 MLB saves; a very different league
-  environment will shift the WAR scale. That mostly cancels out in the residual,
-  since every player is measured against the same fitted line.
-
-## Tests
+## Testing
 
 ```bash
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-174 tests. `tests/fixtures/` holds a 41-player batting export and a 31-player
-pitching export, each with the projections ootpcalculator.com actually returned
-for them. Both pools contain a planted player whose tools are elite and whose
-OVR is 35 — he must come out first.
+258 tests. Fixtures in `tests/fixtures/` are a real export paired with the
+projections the calculator actually returned for it, including a planted
+player whose tools are elite and whose grade is 35 — he must come out first.
+
+Several tests exist because they caught real bugs: a `.xlsx` filename that
+silently wrote CSV, a quadratic fit whose inverse bailed out because its linear
+coefficient was near zero, a schema migration that created an index on a column
+it had not yet added, and a suite that was writing into the user's own database
+and taking twenty times longer for it.
+
+## Layout
+
+| Module | Responsibility |
+| --- | --- |
+| `views.py` | The four export layouts, scale detection, validation |
+| `tables.py` | Reading HTML, TSV and CSV |
+| `reports.py` | Locating game exports and downloads on disk |
+| `flagging.py` | Least-squares fit, position offsets, residual ranking |
+| `pitching.py` | Runs-allowed WAR |
+| `valuation.py` | Surplus value: aging curve, discounting, $/WAR |
+| `database.py` | SQLite store, migrations, queries |
+| `spreadsheet.py` | Formatted, colour-coded workbook output |
+| `cli.py` | Commands |
+
+## Status
+
+Working and in use. Surplus value is modelled and tested but not yet wired to
+live data — it needs salary and contract columns that the export does not carry
+by default. Until then `compare` reports production and the grade gap, and says
+plainly that it is not surplus value rather than implying the cost side has
+been handled.
+
+## Licence
+
+MIT.
