@@ -708,5 +708,88 @@ class PrepareCommandTest(unittest.TestCase):
         self.assertIn("Ratings view", err)
 
 
+
+class GradeFloorTest(unittest.TestCase):
+    """Unusable players distort the fit; --min-grade excludes them."""
+
+    def _subjects(self, grades_and_wars):
+        return [cli.flagging.Subject(name=f"P{i}", position="CF",
+                                     grade=g, war=w)
+                for i, (g, w) in enumerate(grades_and_wars)]
+
+    def test_the_floor_drops_players_below_it(self):
+        subjects = self._subjects([(20, -8.0), (30, -3.0), (50, 2.0),
+                                   (60, 4.0)])
+        with redirect_stdout(io.StringIO()):
+            kept = cli.apply_grade_floor(subjects, 40)
+        self.assertEqual([s.grade for s in kept], [50, 60])
+
+    def test_the_floor_says_how_many_it_dropped(self):
+        subjects = self._subjects([(20, -8.0), (50, 2.0), (60, 4.0)])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.apply_grade_floor(subjects, 40)
+        self.assertIn("Ignoring 1 player", out.getvalue())
+
+    def test_no_floor_keeps_everyone(self):
+        subjects = self._subjects([(20, -8.0), (50, 2.0), (60, 4.0)])
+        err = io.StringIO()
+        with redirect_stderr(err):
+            kept = cli.apply_grade_floor(subjects, None)
+        self.assertEqual(len(kept), 3)
+
+    def test_a_pool_full_of_sub_replacement_players_warns(self):
+        subjects = self._subjects([(20, -8.0)] * 8 + [(60, 4.0)] * 2)
+        err = io.StringIO()
+        with redirect_stderr(err):
+            cli.apply_grade_floor(subjects, None)
+        self.assertIn("below replacement", err.getvalue())
+        self.assertIn("--min-grade", err.getvalue())
+
+    def test_a_healthy_pool_does_not_warn(self):
+        subjects = self._subjects([(45, 1.0), (50, 2.0), (55, 3.0),
+                                   (60, 4.0), (40, -0.5)])
+        err = io.StringIO()
+        with redirect_stderr(err):
+            cli.apply_grade_floor(subjects, None)
+        self.assertEqual(err.getvalue(), "")
+
+    def test_the_floor_steepens_nothing_it_should_not(self):
+        """The point of the floor: a low-grade mass flattens implied grades.
+
+        Fitting only the usable players gives a shallower slope, which spreads
+        the implied grades back out at the top instead of compressing them.
+        """
+        pool = [(20, -8.0)] * 40 + [(g, (g - 40) * 0.15) for g in
+                                    range(40, 71, 5)]
+        subjects = self._subjects(pool)
+        flooded = cli.flagging.analyze(subjects, position_adjust=False)
+        with redirect_stdout(io.StringIO()):
+            kept = cli.apply_grade_floor(subjects, 40)
+        clean = cli.flagging.analyze(kept, position_adjust=False)
+        self.assertGreater(flooded.fits[0].slope, clean.fits[0].slope)
+        self.assertGreater(clean.fits[0].implied_grade(4.0, "CF"),
+                           flooded.fits[0].implied_grade(4.0, "CF"))
+
+    def test_report_accepts_the_flag(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = os.path.join(folder, "floor.db")
+            run(["flag", REPORT, PROJECTIONS, "--overrated", "0",
+                 "--league", "L", "--db", db])
+            code, out, _ = run(["report", "--min-grade", "45", "--limit", "3",
+                                "--db", db])
+        self.assertEqual(code, 0)
+        self.assertIn("Ignoring", out)
+
+    def test_a_floor_that_removes_everyone_fails_clearly(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = os.path.join(folder, "floor.db")
+            run(["flag", REPORT, PROJECTIONS, "--overrated", "0",
+                 "--league", "L", "--db", db])
+            code, _, err = run(["report", "--min-grade", "99", "--db", db])
+        self.assertEqual(code, 1)
+        self.assertIn("grade floor", err)
+
+
 if __name__ == "__main__":
     unittest.main()

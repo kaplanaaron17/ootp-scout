@@ -139,9 +139,13 @@ python -m ootp_scout leagues
 echo.
 set "lg="
 set /p "lg=League (blank if you only have one): "
+set "floor="
+set /p "floor=Ignore players graded below (blank for none): "
 echo.
-if "%lg%"=="" python -m ootp_scout report --mode current --out league.xlsx
-if not "%lg%"=="" python -m ootp_scout report --mode current --league "%lg%" --out league.xlsx
+set "OPTS=--mode current --out league.xlsx"
+if not "%lg%"=="" set "OPTS=%OPTS% --league "%lg%""
+if not "%floor%"=="" set "OPTS=%OPTS% --min-grade %floor%"
+python -m ootp_scout report %OPTS%
 if errorlevel 1 goto PROBLEM
 echo.
 echo Opening league.xlsx...
@@ -155,9 +159,13 @@ python -m ootp_scout leagues
 echo.
 set "lg="
 set /p "lg=League (blank if you only have one): "
+set "floor="
+set /p "floor=Ignore players graded below (blank for none): "
 echo.
-if "%lg%"=="" python -m ootp_scout report --mode potential --out prospects.xlsx
-if not "%lg%"=="" python -m ootp_scout report --mode potential --league "%lg%" --out prospects.xlsx
+set "OPTS=--mode potential --out prospects.xlsx"
+if not "%lg%"=="" set "OPTS=%OPTS% --league "%lg%""
+if not "%floor%"=="" set "OPTS=%OPTS% --min-grade %floor%"
+python -m ootp_scout report %OPTS%
 if errorlevel 1 goto PROBLEM
 echo.
 echo Opening prospects.xlsx...

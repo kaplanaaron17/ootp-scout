@@ -167,6 +167,30 @@ projection look identical. Adding the contract columns to your OOTP view is
 what closes that gap.
 
 
+## Unusable players will wreck the fit
+
+Exporting a whole league includes hundreds of players who would never take the
+field. They are not outliers to be shrugged off - they are most of the pool,
+and they set the slope.
+
+The relationship between grade and WAR is not one straight line across the full
+range. On real data, including everyone made the fitted slope 0.38 WAR per
+grade point; fitting only players graded 40 and up made it 0.20. That
+difference compresses the top: a six-WAR hitter read an implied **60** with no
+floor and **78** with one.
+
+```bash
+python -m ootp_scout report --min-grade 40
+```
+
+The tool warns on its own when more than a third of a pool projects below
+replacement. A quadratic fit does not rescue it - on real data the curve peaks
+around grade 68 and turns downward, claiming a 75 is worse than a 65, and
+cannot be inverted at all above its maximum.
+
+Pick the floor by where your league's players actually stop being usable, and
+keep it the same between runs - changing it changes every number.
+
 ## Multiple leagues
 
 If you play in several online leagues, each is kept separate:
