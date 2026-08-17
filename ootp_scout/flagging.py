@@ -126,9 +126,13 @@ class GroupFit:
     note: str = ""
     grade_min: float = 0.0
     grade_max: float = 0.0
+    # When present, the baseline is this curve rather than the polynomial.
+    curve: "MonotoneCurve | None" = None
 
     @property
     def slope(self) -> float:
+        if self.curve is not None:
+            return self.curve.slope
         return self.coefficients[1] if len(self.coefficients) > 1 else 0.0
 
     @property
@@ -139,10 +143,12 @@ class GroupFit:
                 for i, name in enumerate(self.positions)}
 
     def predict(self, grade: float, position: str) -> float:
+        offset = self.position_offsets.get(normalize_position(position), 0.0)
+        if self.curve is not None:
+            return self.curve.value(grade) + offset
         value = sum(self.coefficients[power] * (grade ** power)
                     for power in range(self.degree + 1))
-        offsets = self.position_offsets
-        return value + offsets.get(normalize_position(position), 0.0)
+        return value + offset
 
     def implied_grade(self, war: float, position: str) -> float | None:
         """The grade this WAR would carry if the fit were read backwards.
@@ -157,6 +163,8 @@ class GroupFit:
         """
         offset = self.position_offsets.get(normalize_position(position), 0.0)
         target = war - offset
+        if self.curve is not None:
+            return self.curve.invert(target)
 
         # The question is answerable when the fit depends on grade at all, not
         # merely when it has a linear term: a curve through y = k*g^2 has a
@@ -231,6 +239,26 @@ def _choose_positions(members: list[Subject]) -> tuple[list[str], str]:
     return positions, reference
 
 
+def _fit_monotone_group(members: list[Subject], linear: GroupFit) -> GroupFit:
+    """Replace a linear baseline with a monotone curve of the same shape.
+
+    Position offsets come from the linear fit first, are subtracted off, and
+    the curve is fitted to what remains. Estimating both at once would need an
+    iterative scheme for very little gain: the offsets are differences between
+    positions, which the overall shape barely disturbs.
+    """
+    offsets = linear.position_offsets
+    adjusted = [s.war - offsets.get(s.normalized_position, 0.0) for s in members]
+    curve = fit_monotone([s.grade for s in members], adjusted)
+    return GroupFit(group=linear.group, count=linear.count,
+                    coefficients=linear.coefficients,
+                    residual_sd=0.0, degree=linear.degree,
+                    positions=linear.positions,
+                    reference_position=linear.reference_position,
+                    note=linear.note, grade_min=linear.grade_min,
+                    grade_max=linear.grade_max, curve=curve)
+
+
 def _fit_group(members: list[Subject], degree: int, position_adjust: bool
                ) -> GroupFit:
     grades = [s.grade for s in members]
@@ -277,8 +305,15 @@ def _fit_group(members: list[Subject], degree: int, position_adjust: bool
 
 
 def analyze(subjects: list[Subject], degree: int = 1,
-            split_by_role: bool = True, position_adjust: bool = True) -> Analysis:
-    """Fit WAR against the grade and score every player's residual."""
+            split_by_role: bool = True, position_adjust: bool = True,
+            shape: str = "linear") -> Analysis:
+    """Fit WAR against the grade and score every player's residual.
+
+    `shape` is "linear" for a straight line or "monotone" for a non-decreasing
+    curve through binned means. The curve exists because the real relationship
+    is concave: a line over-predicts at the top, which marks every high-graded
+    player as overrated for no reason but the shape of the model.
+    """
     groups: dict[str, list[Subject]] = {}
     for subject in subjects:
         key = ("pitchers" if subject.is_pitcher else "hitters") if split_by_role else "all"
@@ -292,6 +327,8 @@ def analyze(subjects: list[Subject], degree: int = 1,
         fit.group = group
         fit.grade_min = min(s.grade for s in members)
         fit.grade_max = max(s.grade for s in members)
+        if shape == "monotone" and len(members) > MIN_PLAYERS_PER_POSITION:
+            fit = _fit_monotone_group(members, fit)
 
         residuals = [s.war - fit.predict(s.grade, s.position) for s in members]
         fit.residual_sd = pstdev(residuals) if len(residuals) > 1 else 0.0
@@ -335,3 +372,155 @@ def select_overrated(findings: list[Finding], limit: int | None = None,
     if limit is not None:
         chosen = chosen[:limit]
     return chosen
+
+
+# --- monotone baseline -------------------------------------------------------
+#
+# A straight line through grade and WAR is wrong in a specific, measurable way:
+# the relationship is concave, so the line over-predicts at both ends. On real
+# league data every player above grade 60 drew a negative residual purely from
+# that mis-shape - the model called them overrated because it expected too much
+# of them, not because anything about them was disappointing.
+#
+# Raising the polynomial degree does not fix it. A quadratic fitted to the same
+# data peaks near grade 68 and turns downward, asserting that a 75 is worse
+# than a 65, and cannot be inverted above its own maximum.
+#
+# What is wanted is a curve that follows the data's shape while never going
+# down. Grades are binned, each bin's mean is taken, and the sequence of means
+# is made non-decreasing by pooling adjacent violators. Binning keeps the
+# sparse top end - five players at grade 70 - from dictating a wild tail, and
+# monotonicity keeps the result invertible, which the implied grade needs.
+
+BIN_WIDTH = 5.0
+MIN_BIN = 3
+
+
+def pool_adjacent_violators(values: list[float], weights: list[float]
+                            ) -> list[float]:
+    """Least-squares fit subject to the result never decreasing.
+
+    Walks left to right; whenever a value would dip below the block before it,
+    the two blocks merge and take their weighted mean. Each block records how
+    many original points it covers so it can be expanded back out at the end.
+    """
+    # Each block is [weighted total, weight, count].
+    blocks: list[list[float]] = []
+    for value, weight in zip(values, weights):
+        blocks.append([value * weight, weight, 1])
+        while len(blocks) > 1:
+            previous, current = blocks[-2], blocks[-1]
+            if previous[0] / previous[1] <= current[0] / current[1]:
+                break
+            blocks[-2:] = [[previous[0] + current[0],
+                            previous[1] + current[1],
+                            previous[2] + current[2]]]
+
+    result: list[float] = []
+    for total, weight, count in blocks:
+        result.extend([total / weight] * int(count))
+    return result
+
+
+@dataclass
+class MonotoneCurve:
+    """A non-decreasing piecewise-linear baseline through binned means."""
+
+    grades: list[float]
+    wars: list[float]
+
+    @property
+    def slope(self) -> float:
+        if len(self.grades) < 2:
+            return 0.0
+        return ((self.wars[-1] - self.wars[0])
+                / (self.grades[-1] - self.grades[0]))
+
+    def _edge_slope(self, at_start: bool) -> float:
+        if len(self.grades) < 2:
+            return 0.0
+        i, j = (0, 1) if at_start else (-2, -1)
+        span = self.grades[j] - self.grades[i]
+        return (self.wars[j] - self.wars[i]) / span if span else 0.0
+
+    def value(self, grade: float) -> float:
+        if not self.grades:
+            return 0.0
+        if grade <= self.grades[0]:
+            return self.wars[0] + (grade - self.grades[0]) * self._edge_slope(True)
+        if grade >= self.grades[-1]:
+            return self.wars[-1] + (grade - self.grades[-1]) * self._edge_slope(False)
+        for index in range(len(self.grades) - 1):
+            low, high = self.grades[index], self.grades[index + 1]
+            if low <= grade <= high:
+                span = high - low
+                if span == 0:
+                    return self.wars[index]
+                share = (grade - low) / span
+                return self.wars[index] + share * (self.wars[index + 1]
+                                                   - self.wars[index])
+        return self.wars[-1]
+
+    def invert(self, war: float) -> float | None:
+        """The grade whose baseline is `war`.
+
+        Flat stretches map a whole range of grades to one WAR. The midpoint of
+        that range is returned, because no grade inside it is a better answer
+        than any other - and the flat run is found first, so a plateau at
+        either end is treated as a plateau rather than as the edge.
+        """
+        if not self.grades:
+            return None
+
+        tolerance = 1e-9
+        matching = [index for index, value in enumerate(self.wars)
+                    if abs(value - war) <= tolerance]
+        if matching:
+            return (self.grades[matching[0]] + self.grades[matching[-1]]) / 2.0
+
+        if war < self.wars[0]:
+            slope = self._edge_slope(True)
+            if abs(slope) < tolerance:
+                return self.grades[0]
+            return self.grades[0] + (war - self.wars[0]) / slope
+        if war > self.wars[-1]:
+            slope = self._edge_slope(False)
+            if abs(slope) < tolerance:
+                return self.grades[-1]
+            return self.grades[-1] + (war - self.wars[-1]) / slope
+
+        for index in range(len(self.grades) - 1):
+            low, high = self.wars[index], self.wars[index + 1]
+            if low <= war <= high and high - low > tolerance:
+                share = (war - low) / (high - low)
+                return self.grades[index] + share * (self.grades[index + 1]
+                                                     - self.grades[index])
+        return self.grades[-1]
+
+
+def fit_monotone(grades: list[float], wars: list[float],
+                 bin_width: float = BIN_WIDTH) -> MonotoneCurve:
+    """Bin by grade, average, then force the sequence never to decrease."""
+    buckets: dict[float, list[float]] = {}
+    for grade, war in zip(grades, wars):
+        key = round(grade / bin_width) * bin_width
+        buckets.setdefault(key, []).append(war)
+
+    # Fold bins too thin to mean anything into their neighbour, so a lone
+    # player at the top cannot define the tail on his own.
+    keys = sorted(buckets)
+    merged: list[tuple[float, list[float]]] = []
+    for key in keys:
+        if merged and len(buckets[key]) < MIN_BIN:
+            merged[-1][1].extend(buckets[key])
+        else:
+            merged.append((key, list(buckets[key])))
+    while len(merged) > 1 and len(merged[0][1]) < MIN_BIN:
+        merged[1][1].extend(merged[0][1])
+        merged.pop(0)
+
+    centres = [key for key, _values in merged]
+    means = [sum(values) / len(values) for _key, values in merged]
+    weights = [float(len(values)) for _key, values in merged]
+    return MonotoneCurve(grades=centres,
+                         wars=pool_adjacent_violators(means, weights))

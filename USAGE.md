@@ -188,8 +188,35 @@ replacement. A quadratic fit does not rescue it - on real data the curve peaks
 around grade 68 and turns downward, claiming a 75 is worse than a 65, and
 cannot be inverted at all above its maximum.
 
+`--min-grade` applies to the grade being fitted. A prospect graded 25 now with
+a potential of 65 is therefore excluded from a *current* report — which is
+right, because he would never take the field this season and including him
+recreates the distortion. `--min-any-grade` keeps such players when you want
+them.
+
 Pick the floor by where your league's players actually stop being usable, and
 keep it the same between runs - changing it changes every number.
+
+## Why high-graded players were all showing red
+
+A straight line through grade and WAR is wrong in a measurable way: the real
+relationship is concave, so a line over-predicts at the top. On real league
+data, mean residual by grade under a linear fit ran
+
+```
+OVR 45  +0.29      OVR 60  -0.25
+OVR 50  +0.26      OVR 65  -0.71
+```
+
+Every player above 60 was marked overrated by the shape of the model, not by
+anything about the player. The baseline is therefore fitted as a **monotone
+curve** through binned means rather than a straight line — it follows the shape
+in the data while never going down, which keeps the implied grade invertible.
+That took the bias at OVR 65 from -0.71 to -0.05.
+
+`--shape linear` restores the old behaviour. Raising `--degree` does not help
+and should not be used for this: a quadratic on the same data peaks near grade
+68 and turns downward, claiming a 75 is worse than a 65.
 
 ## Multiple leagues
 

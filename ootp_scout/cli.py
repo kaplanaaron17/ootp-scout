@@ -100,6 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
                       help="also list the N most overrated players - those "
                            "projecting furthest below their grade (default: "
                            "10; 0 turns it off)")
+    flag.add_argument("--shape", choices=("monotone", "linear"),
+                    default="monotone",
+                    help="monotone follows the curve in the data; linear "
+                         "forces a straight line, which over-predicts at the "
+                         "top and marks high-graded players overrated for no "
+                         "reason")
     flag.add_argument("--min-grade", type=float, default=None,
                     help="ignore players graded below this when fitting; a pool "
                          "full of players who would never take the field drags "
@@ -137,6 +143,18 @@ def build_parser() -> argparse.ArgumentParser:
                         help="which league to report on. Required when the "
                              "database holds more than one, since leagues use "
                              "different rating scales and must not be mixed.")
+    report.add_argument("--shape", choices=("monotone", "linear"),
+                    default="monotone",
+                    help="monotone follows the curve in the data; linear "
+                         "forces a straight line, which over-predicts at the "
+                         "top and marks high-graded players overrated for no "
+                         "reason")
+    report.add_argument("--min-any-grade", action="store_true",
+                        help="with --min-grade, keep a player whose OTHER "
+                             "grade clears the floor - a low-rated prospect "
+                             "with high potential survives a current-ratings "
+                             "floor. Off by default, because in a current fit "
+                             "those players are the ones who never play.")
     report.add_argument("--min-grade", type=float, default=None,
                     help="ignore players graded below this when fitting; a pool "
                          "full of players who would never take the field drags "
@@ -166,6 +184,12 @@ def build_parser() -> argparse.ArgumentParser:
                          help="comma-separated player names")
     compare.add_argument("side_b", metavar="SIDE-B",
                          help="comma-separated player names")
+    compare.add_argument("--shape", choices=("monotone", "linear"),
+                    default="monotone",
+                    help="monotone follows the curve in the data; linear "
+                         "forces a straight line, which over-predicts at the "
+                         "top and marks high-graded players overrated for no "
+                         "reason")
     compare.add_argument("--min-grade", type=float, default=None,
                     help="ignore players graded below this when fitting; a pool "
                          "full of players who would never take the field drags "
@@ -363,7 +387,8 @@ def command_flag(args: argparse.Namespace) -> int:
 
     analysis = flagging.analyze(subjects, degree=args.degree,
                                 split_by_role=not args.pool,
-                                position_adjust=args.position_adjust)
+                                position_adjust=args.position_adjust,
+                                shape=args.shape)
     findings = flagging.select(analysis.findings, limit=args.limit,
                                min_z=args.min_z)
 
@@ -565,7 +590,8 @@ def resolve_league(connection, requested: str | None) -> str | None:
     return None
 
 
-def apply_grade_floor(subjects, min_grade, label="OVR"):
+def apply_grade_floor(subjects, min_grade, label="OVR", other_grades=None,
+                      spare_on_other=False):
     """Drop players below `min_grade`, and warn when the pool looks unusable.
 
     The fit assumes one straight relationship between grade and WAR. Across a
@@ -576,11 +602,27 @@ def apply_grade_floor(subjects, min_grade, label="OVR"):
     an implied 60 with no floor and 78 with one.
     """
     if min_grade is not None:
-        kept = [s for s in subjects if s.grade >= min_grade]
+        other = other_grades or {}
+
+        def usable(subject):
+            if subject.grade >= min_grade:
+                return True
+            # Only when explicitly asked: a high-potential teenager belongs in
+            # a prospect fit, but in a current-ratings fit he is one of the
+            # players who would never take the field, and letting him back in
+            # recreates exactly the distortion the floor exists to remove.
+            if not spare_on_other:
+                return False
+            return other.get(subject.name.strip().lower(), -1e9) >= min_grade
+
+        kept = [s for s in subjects if usable(s)]
         dropped = len(subjects) - len(kept)
         if dropped:
-            print(f"Ignoring {dropped} player(s) graded below {min_grade:.0f}; "
-                  f"fitting on the remaining {len(kept)}.")
+            spared = sum(1 for s in kept if s.grade < min_grade)
+            extra = (f", keeping {spared} whose other grade clears it"
+                     if spared else "")
+            print(f"Ignoring {dropped} player(s) graded below {min_grade:.0f}"
+                  f"{extra}; fitting on the remaining {len(kept)}.")
         return kept
 
     below = sum(1 for s in subjects if s.war < 0)
@@ -692,6 +734,15 @@ def command_report(args: argparse.Namespace) -> int:
                       file=sys.stderr)
         rows = database.latest(connection, mode=mode, role=args.role,
                                team=args.team, league=league)
+        # A grade floor should not discard a prospect who is unusable today
+        # and excellent later, so the other mode's grade is fetched and the
+        # better of the two decides. "Below 38 now and below 38 ever" is a
+        # different claim from "below 38 now".
+        other = views.POTENTIAL if mode == views.CURRENT else views.CURRENT
+        best_other = {r["name_key"]: r["grade"]
+                      for r in database.latest(connection, mode=other,
+                                               league=league)
+                      if r["grade"] is not None}
     finally:
         connection.close()
 
@@ -710,7 +761,8 @@ def command_report(args: argparse.Namespace) -> int:
               "that organisation rather than the league.", file=sys.stderr)
 
     grade_label = "POT" if mode == views.POTENTIAL else "OVR"
-    subjects = apply_grade_floor(subjects, args.min_grade, grade_label)
+    subjects = apply_grade_floor(subjects, args.min_grade, grade_label,
+                                 best_other, args.min_any_grade)
     if len(subjects) < MIN_MATCHES:
         print(f"error: only {len(subjects)} player(s) left above the grade "
               "floor - not enough to fit against.", file=sys.stderr)
@@ -718,7 +770,8 @@ def command_report(args: argparse.Namespace) -> int:
 
     analysis = flagging.analyze(subjects, degree=args.degree,
                                 split_by_role=not args.pool,
-                                position_adjust=args.position_adjust)
+                                position_adjust=args.position_adjust,
+                                shape=args.shape)
     findings = flagging.select(analysis.findings, limit=args.limit,
                                min_z=args.min_z)
 
@@ -846,7 +899,8 @@ def command_compare(args: argparse.Namespace) -> int:
 
     analysis = flagging.analyze(subjects, degree=args.degree,
                                 split_by_role=not args.pool,
-                                position_adjust=args.position_adjust)
+                                position_adjust=args.position_adjust,
+                                shape=args.shape)
     by_name = {f.subject.name.strip().lower(): f for f in analysis.findings}
 
     def resolve(names: list[str]) -> tuple[list, list[str]]:
