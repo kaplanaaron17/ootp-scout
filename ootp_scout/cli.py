@@ -111,6 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
                       help="also list the N most overrated players - those "
                            "projecting furthest below their grade (default: "
                            "10; 0 turns it off)")
+    flag.add_argument("--no-split-starters", dest="split_starters",
+                      action="store_false",
+                      help="fit starters and relievers together; they are "
+                           "apart by default because the gap between them "
+                           "widens with grade, which one offset cannot express")
+    flag.set_defaults(split_starters=True)
     flag.add_argument("--shape", choices=("monotone", "linear"),
                     default="monotone",
                     help="monotone follows the curve in the data; linear "
@@ -154,6 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="which league to report on. Required when the "
                              "database holds more than one, since leagues use "
                              "different rating scales and must not be mixed.")
+    report.add_argument("--no-split-starters", dest="split_starters",
+                    action="store_false")
+    report.set_defaults(split_starters=True)
     report.add_argument("--shape", choices=("monotone", "linear"),
                     default="monotone",
                     help="monotone follows the curve in the data; linear "
@@ -195,6 +204,9 @@ def build_parser() -> argparse.ArgumentParser:
                          help="comma-separated player names")
     compare.add_argument("side_b", metavar="SIDE-B",
                          help="comma-separated player names")
+    compare.add_argument("--no-split-starters", dest="split_starters",
+                    action="store_false")
+    compare.set_defaults(split_starters=True)
     compare.add_argument("--shape", choices=("monotone", "linear"),
                     default="monotone",
                     help="monotone follows the curve in the data; linear "
@@ -402,6 +414,7 @@ def command_flag(args: argparse.Namespace) -> int:
                                 split_by_role=not args.pool,
                                 position_adjust=args.position_adjust,
                                 shape=args.shape,
+                                split_starters=args.split_starters,
                                 grade_bounds=bounds_for(detected_scale))
     findings = flagging.select(analysis.findings, limit=args.limit,
                                min_z=args.min_z)
@@ -813,7 +826,8 @@ def command_report(args: argparse.Namespace) -> int:
     analysis = flagging.analyze(subjects, degree=args.degree,
                                 split_by_role=not args.pool,
                                 position_adjust=args.position_adjust,
-                                shape=args.shape, grade_bounds=grade_bounds)
+                                shape=args.shape,
+                                split_starters=args.split_starters, grade_bounds=grade_bounds)
     findings = flagging.select(analysis.findings, limit=args.limit,
                                min_z=args.min_z)
 
@@ -942,7 +956,8 @@ def command_compare(args: argparse.Namespace) -> int:
     analysis = flagging.analyze(subjects, degree=args.degree,
                                 split_by_role=not args.pool,
                                 position_adjust=args.position_adjust,
-                                shape=args.shape)
+                                shape=args.shape,
+                                split_starters=args.split_starters)
     by_name = {f.subject.name.strip().lower(): f for f in analysis.findings}
 
     def resolve(names: list[str]) -> tuple[list, list[str]]:

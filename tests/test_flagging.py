@@ -66,7 +66,7 @@ class AnalyzeTest(unittest.TestCase):
                                 position="SP"))
         analysis = flagging.analyze(pool)
         self.assertEqual({fit.group for fit in analysis.fits},
-                         {"hitters", "pitchers"})
+                         {"hitters", "starters"})
         # Each group sits on its own line, so nothing looks anomalous.
         self.assertLess(max(abs(f.residual) for f in analysis.findings), 0.01)
 

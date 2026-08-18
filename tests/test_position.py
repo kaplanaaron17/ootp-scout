@@ -93,7 +93,7 @@ class PositionOffsetTest(unittest.TestCase):
                                 position="SS"))
         analysis = flagging.analyze(pool)
         groups = {fit.group: fit for fit in analysis.fits}
-        self.assertEqual(set(groups), {"hitters", "pitchers"})
+        self.assertEqual(set(groups), {"hitters", "starters", "relievers"})
         self.assertLess(max(abs(f.residual) for f in analysis.findings), 0.01)
 
     def test_fit_degrades_rather_than_crashing_on_a_tiny_group(self):
@@ -101,6 +101,68 @@ class PositionOffsetTest(unittest.TestCase):
                 subject("B", 60.0, 2.0, position="1B")]
         analysis = flagging.analyze(pool)
         self.assertEqual(len(analysis.findings), 2)
+
+
+class StarterRelieverSplitTest(unittest.TestCase):
+    """A widening gap cannot be an offset, so the two are fitted apart."""
+
+    def _pool(self):
+        # Starters improve with grade; relievers barely do. The gap therefore
+        # widens, which is what a constant offset cannot express.
+        pool = []
+        for grade in range(40, 76, 5):
+            for index in range(5):
+                pool.append(subject(f"SP{grade}-{index}", float(grade),
+                                    (grade - 40) * 0.14, position="SP"))
+                pool.append(subject(f"RP{grade}-{index}", float(grade),
+                                    (grade - 40) * 0.02, position="RP"))
+        return pool
+
+    def test_they_land_in_separate_groups(self):
+        analysis = flagging.analyze(self._pool())
+        self.assertEqual({fit.group for fit in analysis.fits},
+                         {"starters", "relievers"})
+
+    def test_split_apart_neither_group_shows_false_residuals(self):
+        analysis = flagging.analyze(self._pool(), shape="monotone")
+        self.assertLess(max(abs(f.residual) for f in analysis.findings), 0.2)
+
+    def test_forcing_them_together_distorts_both(self):
+        analysis = flagging.analyze(self._pool(), shape="monotone",
+                                    split_starters=False)
+        self.assertEqual({fit.group for fit in analysis.fits}, {"pitchers"})
+        self.assertGreater(max(abs(f.residual) for f in analysis.findings), 0.5)
+
+    def test_the_starter_curve_reaches_higher_than_the_reliever_curve(self):
+        analysis = flagging.analyze(self._pool(), shape="monotone")
+        curves = {fit.group: fit.curve for fit in analysis.fits}
+        self.assertGreater(curves["starters"].wars[-1],
+                           curves["relievers"].wars[-1])
+
+    def test_closers_are_grouped_with_relievers(self):
+        pool = self._pool()
+        pool.append(subject("Closer", 60.0, 1.0, position="CL"))
+        analysis = flagging.analyze(pool)
+        closer = next(f for f in analysis.findings
+                      if f.subject.name == "Closer")
+        self.assertEqual(closer.group, "relievers")
+
+    def test_a_pitcher_with_no_position_is_folded_in_rather_than_alone(self):
+        pool = self._pool()
+        pool.append(flagging.Subject(name="Mystery", position="", grade=55.0,
+                                     war=2.0, is_pitcher=True))
+        analysis = flagging.analyze(pool)
+        self.assertNotIn("pitchers", {fit.group for fit in analysis.fits})
+        self.assertIn("Mystery", [f.subject.name for f in analysis.findings])
+
+    def test_hitters_are_untouched_by_the_split(self):
+        pool = self._pool()
+        for grade in range(40, 76, 5):
+            for index in range(5):
+                pool.append(subject(f"H{grade}-{index}", float(grade),
+                                    (grade - 40) * 0.1, position="CF"))
+        analysis = flagging.analyze(pool)
+        self.assertIn("hitters", {fit.group for fit in analysis.fits})
 
 
 if __name__ == "__main__":

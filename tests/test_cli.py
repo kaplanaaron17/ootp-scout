@@ -411,11 +411,14 @@ class DatabaseCommandTest(unittest.TestCase):
     def test_report_keeps_roles_fitted_separately(self):
         _, out, _ = run(["report", "--db", self.db])
         self.assertIn("fit[hitters]", out)
-        self.assertIn("fit[pitchers]", out)
+        self.assertIn("fit[starters]", out)
 
     def test_report_can_restrict_to_one_role(self):
+        """Starters and relievers are fitted apart - the gap between them
+        widens with grade, so one offset cannot describe it."""
         _, out, _ = run(["report", "--role", "pitcher", "--db", self.db])
-        self.assertIn("fit[pitchers]", out)
+        self.assertIn("fit[starters]", out)
+        self.assertIn("fit[relievers]", out)
         self.assertNotIn("fit[hitters]", out)
 
     def test_report_writes_a_spreadsheet(self):

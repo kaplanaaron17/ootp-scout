@@ -31,6 +31,15 @@ MIN_PLAYERS_PER_POSITION = 4
 
 _POSITION_ALIASES = {"CL": "RP", "MR": "RP", "SR": "RP", "P": "SP"}
 
+# Starters and relievers are fitted apart rather than sharing a curve with an
+# offset between them. A position offset is a constant, and the gap between
+# them is not: on real league data it ran 0.54 wins at grade 40 and 4.22 at
+# grade 70, because a starter's innings scale with his quality and a
+# reliever's do not. Forcing one curve through both flattens its top, which
+# made every good pitcher land off the end of the rating scale.
+STARTER_POSITIONS = {"SP"}
+RELIEVER_POSITIONS = {"RP"}
+
 
 def normalize_position(position: str) -> str:
     text = (position or "").strip().upper()
@@ -306,10 +315,28 @@ def _fit_group(members: list[Subject], degree: int, position_adjust: bool
                     note="flat baseline (the grade column carries no signal here)")
 
 
+def group_of(subject: Subject, split_by_role: bool,
+             split_starters: bool = True) -> str:
+    """Which fit a player belongs to."""
+    if not split_by_role:
+        return "all"
+    if not subject.is_pitcher:
+        return "hitters"
+    if not split_starters:
+        return "pitchers"
+    position = subject.normalized_position
+    if position in STARTER_POSITIONS:
+        return "starters"
+    if position in RELIEVER_POSITIONS:
+        return "relievers"
+    return "pitchers"
+
+
 def analyze(subjects: list[Subject], degree: int = 1,
             split_by_role: bool = True, position_adjust: bool = True,
             shape: str = "linear",
-            grade_bounds: "tuple[float, float] | None" = None) -> Analysis:
+            grade_bounds: "tuple[float, float] | None" = None,
+            split_starters: bool = True) -> Analysis:
     """Fit WAR against the grade and score every player's residual.
 
     `shape` is "linear" for a straight line or "monotone" for a non-decreasing
@@ -319,8 +346,19 @@ def analyze(subjects: list[Subject], degree: int = 1,
     """
     groups: dict[str, list[Subject]] = {}
     for subject in subjects:
-        key = ("pitchers" if subject.is_pitcher else "hitters") if split_by_role else "all"
-        groups.setdefault(key, []).append(subject)
+        groups.setdefault(group_of(subject, split_by_role, split_starters),
+                          []).append(subject)
+
+    # A handful of arms with no usable position would otherwise be fitted
+    # against themselves; fold them into whichever pitching group is larger.
+    strays = groups.pop("pitchers", None) if split_starters else None
+    if strays:
+        biggest = max((g for g in ("starters", "relievers") if g in groups),
+                      key=lambda g: len(groups[g]), default=None)
+        if biggest and len(strays) < MIN_PLAYERS_PER_POSITION:
+            groups[biggest].extend(strays)
+        else:
+            groups["pitchers"] = strays
 
     findings: list[Finding] = []
     fits: list[GroupFit] = []

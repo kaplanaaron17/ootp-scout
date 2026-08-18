@@ -242,6 +242,26 @@ pitcher's bat against a grade that describes his arm is a category error, and a
 loud one — a starter led the overrated list because of it. Players whose
 position belongs to the other role are dropped from the fit and reported.
 
+## Implied grade is within a role, not across them
+
+A pitcher and a hitter with the same projected WAR will not show the same
+implied grade, and should not. Each is measured against his own group's curve,
+because a grade of 70 does not mean the same number of wins for a starter, a
+reliever and a shortstop — which is equally true of OOTP's own OVR.
+
+**Use WAR to compare across roles. Use the implied grade and the differential
+to compare within one.**
+
+Starters and relievers are fitted apart from each other for the same reason,
+and it matters more than it sounds. On real league data the gap between them
+ran 0.54 wins at grade 40 and 4.22 at grade 70 — a starter's innings scale with
+his quality and a reliever's do not. A position offset is a constant and cannot
+express a gap that widens, so forcing one curve through both flattened its top,
+and every good pitcher fell off the end of the scale. Split apart, the starter
+curve reaches 4.94 WAR where the blended one stopped at 2.50.
+
+`--no-split-starters` puts them back together if you want to see it.
+
 ## Multiple leagues
 
 If you play in several online leagues, each is kept separate:
