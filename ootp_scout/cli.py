@@ -28,6 +28,17 @@ REPORT_FIELDS = [
     "residual", "z_score", "scouting_accuracy",
 ]
 
+# What each rating scale can express. An implied grade outside these is not a
+# grade at all, so it is reported at the boundary instead.
+SCALE_BOUNDS = {"20 to 80": (20.0, 80.0), "1 to 100": (1.0, 100.0),
+                "1 to 20": (1.0, 20.0), "1 to 10": (1.0, 10.0),
+                "2 to 8": (2.0, 8.0), "1 to 5": (1.0, 5.0)}
+
+
+def bounds_for(scale: str | None) -> tuple[float, float] | None:
+    return SCALE_BOUNDS.get((scale or "").strip())
+
+
 # Below this many matched players there is no pool to fit against.
 MIN_MATCHES = 5
 # When more than this share of a pool projects below replacement, the fit is
@@ -379,6 +390,8 @@ def command_flag(args: argparse.Namespace) -> int:
               f"({match_rate:.0%}) matched a projection. The ranking below "
               f"covers just those {len(subjects)}.\n", file=sys.stderr)
 
+    detected_scale, _reason = views.infer_scale(rows, view)
+    subjects = drop_cross_role(subjects, view.role)
     subjects = apply_grade_floor(subjects, args.min_grade, view.grade_column)
     if len(subjects) < MIN_MATCHES:
         print(f"error: only {len(subjects)} player(s) left above the grade "
@@ -388,7 +401,8 @@ def command_flag(args: argparse.Namespace) -> int:
     analysis = flagging.analyze(subjects, degree=args.degree,
                                 split_by_role=not args.pool,
                                 position_adjust=args.position_adjust,
-                                shape=args.shape)
+                                shape=args.shape,
+                                grade_bounds=bounds_for(detected_scale))
     findings = flagging.select(analysis.findings, limit=args.limit,
                                min_z=args.min_z)
 
@@ -590,6 +604,30 @@ def resolve_league(connection, requested: str | None) -> str | None:
     return None
 
 
+PITCHING_POSITIONS = {"SP", "RP", "CL", "P", "MR", "SR"}
+
+
+def drop_cross_role(subjects, role):
+    """Remove players whose position belongs to the other role.
+
+    A pitcher turns up in a Batting Ratings export carrying batting ratings and
+    a grade that describes his pitching. Measuring his hitting against that
+    grade is a category error, and a loud one: on real data a starting pitcher
+    led the overrated list purely because his OVR reflected an arm his bat was
+    never going to match.
+    """
+    wanted_pitchers = role == views.PITCHER
+    kept = [s for s in subjects
+            if (flagging.normalize_position(s.position) in PITCHING_POSITIONS)
+            == wanted_pitchers]
+    dropped = len(subjects) - len(kept)
+    if dropped:
+        other = "position players" if wanted_pitchers else "pitchers"
+        print(f"Ignoring {dropped} {other} found in this pool; their grade "
+              f"describes the other half of their game.")
+    return kept
+
+
 def apply_grade_floor(subjects, min_grade, label="OVR", other_grades=None,
                       spare_on_other=False):
     """Drop players below `min_grade`, and warn when the pool looks unusable.
@@ -738,6 +776,7 @@ def command_report(args: argparse.Namespace) -> int:
         # and excellent later, so the other mode's grade is fetched and the
         # better of the two decides. "Below 38 now and below 38 ever" is a
         # different claim from "below 38 now".
+        scales = {r["scale"] for r in rows if r["scale"]}
         other = views.POTENTIAL if mode == views.CURRENT else views.CURRENT
         best_other = {r["name_key"]: r["grade"]
                       for r in database.latest(connection, mode=other,
@@ -761,6 +800,8 @@ def command_report(args: argparse.Namespace) -> int:
               "that organisation rather than the league.", file=sys.stderr)
 
     grade_label = "POT" if mode == views.POTENTIAL else "OVR"
+    if args.role:
+        subjects = drop_cross_role(subjects, args.role)
     subjects = apply_grade_floor(subjects, args.min_grade, grade_label,
                                  best_other, args.min_any_grade)
     if len(subjects) < MIN_MATCHES:
@@ -768,10 +809,11 @@ def command_report(args: argparse.Namespace) -> int:
               "floor - not enough to fit against.", file=sys.stderr)
         return 1
 
+    grade_bounds = bounds_for(next(iter(scales))) if len(scales) == 1 else None
     analysis = flagging.analyze(subjects, degree=args.degree,
                                 split_by_role=not args.pool,
                                 position_adjust=args.position_adjust,
-                                shape=args.shape)
+                                shape=args.shape, grade_bounds=grade_bounds)
     findings = flagging.select(analysis.findings, limit=args.limit,
                                min_z=args.min_z)
 

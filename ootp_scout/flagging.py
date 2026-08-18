@@ -239,7 +239,9 @@ def _choose_positions(members: list[Subject]) -> tuple[list[str], str]:
     return positions, reference
 
 
-def _fit_monotone_group(members: list[Subject], linear: GroupFit) -> GroupFit:
+def _fit_monotone_group(members: list[Subject], linear: GroupFit,
+                        bounds: "tuple[float, float] | None" = None
+                        ) -> GroupFit:
     """Replace a linear baseline with a monotone curve of the same shape.
 
     Position offsets come from the linear fit first, are subtracted off, and
@@ -249,7 +251,7 @@ def _fit_monotone_group(members: list[Subject], linear: GroupFit) -> GroupFit:
     """
     offsets = linear.position_offsets
     adjusted = [s.war - offsets.get(s.normalized_position, 0.0) for s in members]
-    curve = fit_monotone([s.grade for s in members], adjusted)
+    curve = fit_monotone([s.grade for s in members], adjusted, bounds=bounds)
     return GroupFit(group=linear.group, count=linear.count,
                     coefficients=linear.coefficients,
                     residual_sd=0.0, degree=linear.degree,
@@ -306,7 +308,8 @@ def _fit_group(members: list[Subject], degree: int, position_adjust: bool
 
 def analyze(subjects: list[Subject], degree: int = 1,
             split_by_role: bool = True, position_adjust: bool = True,
-            shape: str = "linear") -> Analysis:
+            shape: str = "linear",
+            grade_bounds: "tuple[float, float] | None" = None) -> Analysis:
     """Fit WAR against the grade and score every player's residual.
 
     `shape` is "linear" for a straight line or "monotone" for a non-decreasing
@@ -328,7 +331,7 @@ def analyze(subjects: list[Subject], degree: int = 1,
         fit.grade_min = min(s.grade for s in members)
         fit.grade_max = max(s.grade for s in members)
         if shape == "monotone" and len(members) > MIN_PLAYERS_PER_POSITION:
-            fit = _fit_monotone_group(members, fit)
+            fit = _fit_monotone_group(members, fit, grade_bounds)
 
         residuals = [s.war - fit.predict(s.grade, s.position) for s in members]
         fit.residual_sd = pstdev(residuals) if len(residuals) > 1 else 0.0
@@ -428,6 +431,10 @@ class MonotoneCurve:
 
     grades: list[float]
     wars: list[float]
+    # The rating scale's own limits. Past them an implied grade is not a number
+    # the scale can express, so it is reported at the boundary rather than as
+    # an extrapolation nobody can act on.
+    bounds: "tuple[float, float] | None" = None
 
     @property
     def slope(self) -> float:
@@ -436,12 +443,26 @@ class MonotoneCurve:
         return ((self.wars[-1] - self.wars[0])
                 / (self.grades[-1] - self.grades[0]))
 
+    # A single end segment is a poor guide for extrapolating past it: the top
+    # bins hold few players, and one nearly-flat pair sends the inverse to
+    # infinity. Real data had a pitcher curve rising 0.06 WAR across its last
+    # bin, which turned a 5.66-WAR arm into an implied grade of 227. The
+    # extrapolation slope is therefore held to a share of the overall rise.
+    MIN_EDGE_SLOPE_SHARE = 0.5
+
     def _edge_slope(self, at_start: bool) -> float:
         if len(self.grades) < 2:
             return 0.0
         i, j = (0, 1) if at_start else (-2, -1)
         span = self.grades[j] - self.grades[i]
-        return (self.wars[j] - self.wars[i]) / span if span else 0.0
+        local = (self.wars[j] - self.wars[i]) / span if span else 0.0
+        return max(local, abs(self.slope) * self.MIN_EDGE_SLOPE_SHARE)
+
+    def _clamp(self, grade: float) -> float:
+        if self.bounds is None:
+            return grade
+        low, high = self.bounds
+        return min(high, max(low, grade))
 
     def value(self, grade: float) -> float:
         if not self.grades:
@@ -476,30 +497,33 @@ class MonotoneCurve:
         matching = [index for index, value in enumerate(self.wars)
                     if abs(value - war) <= tolerance]
         if matching:
-            return (self.grades[matching[0]] + self.grades[matching[-1]]) / 2.0
+            return self._clamp((self.grades[matching[0]]
+                                + self.grades[matching[-1]]) / 2.0)
 
         if war < self.wars[0]:
             slope = self._edge_slope(True)
             if abs(slope) < tolerance:
-                return self.grades[0]
-            return self.grades[0] + (war - self.wars[0]) / slope
+                return self._clamp(self.grades[0])
+            return self._clamp(self.grades[0] + (war - self.wars[0]) / slope)
         if war > self.wars[-1]:
             slope = self._edge_slope(False)
             if abs(slope) < tolerance:
-                return self.grades[-1]
-            return self.grades[-1] + (war - self.wars[-1]) / slope
+                return self._clamp(self.grades[-1])
+            return self._clamp(self.grades[-1] + (war - self.wars[-1]) / slope)
 
         for index in range(len(self.grades) - 1):
             low, high = self.wars[index], self.wars[index + 1]
             if low <= war <= high and high - low > tolerance:
                 share = (war - low) / (high - low)
-                return self.grades[index] + share * (self.grades[index + 1]
-                                                     - self.grades[index])
-        return self.grades[-1]
+                return self._clamp(self.grades[index]
+                                   + share * (self.grades[index + 1]
+                                              - self.grades[index]))
+        return self._clamp(self.grades[-1])
 
 
 def fit_monotone(grades: list[float], wars: list[float],
-                 bin_width: float = BIN_WIDTH) -> MonotoneCurve:
+                 bin_width: float = BIN_WIDTH,
+                 bounds: "tuple[float, float] | None" = None) -> MonotoneCurve:
     """Bin by grade, average, then force the sequence never to decrease."""
     buckets: dict[float, list[float]] = {}
     for grade, war in zip(grades, wars):
@@ -523,4 +547,5 @@ def fit_monotone(grades: list[float], wars: list[float],
     means = [sum(values) / len(values) for _key, values in merged]
     weights = [float(len(values)) for _key, values in merged]
     return MonotoneCurve(grades=centres,
-                         wars=pool_adjacent_violators(means, weights))
+                         wars=pool_adjacent_violators(means, weights),
+                         bounds=bounds)

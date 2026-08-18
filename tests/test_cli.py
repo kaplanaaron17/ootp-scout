@@ -709,6 +709,58 @@ class PrepareCommandTest(unittest.TestCase):
 
 
 
+class CrossRoleTest(unittest.TestCase):
+    """Pitchers turn up in batting exports; their grade is not a hitting grade."""
+
+    def _mixed(self):
+        return [cli.flagging.Subject(name="Hitter", position="CF", grade=50,
+                                     war=2.0),
+                cli.flagging.Subject(name="Catcher", position="C", grade=50,
+                                     war=2.0),
+                cli.flagging.Subject(name="Starter", position="SP", grade=50,
+                                     war=-4.0),
+                cli.flagging.Subject(name="Reliever", position="RP", grade=50,
+                                     war=-4.0)]
+
+    def test_pitchers_are_dropped_from_a_batter_pool(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            kept = cli.drop_cross_role(self._mixed(), "batter")
+        self.assertEqual([s.name for s in kept], ["Hitter", "Catcher"])
+        self.assertIn("Ignoring 2 pitchers", out.getvalue())
+
+    def test_position_players_are_dropped_from_a_pitcher_pool(self):
+        with redirect_stdout(io.StringIO()):
+            kept = cli.drop_cross_role(self._mixed(), "pitcher")
+        self.assertEqual([s.name for s in kept], ["Starter", "Reliever"])
+
+    def test_closers_count_as_pitchers(self):
+        pool = [cli.flagging.Subject(name="Closer", position="CL", grade=50,
+                                     war=1.0)]
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(len(cli.drop_cross_role(pool, "pitcher")), 1)
+            self.assertEqual(len(cli.drop_cross_role(pool, "batter")), 0)
+
+    def test_a_clean_pool_says_nothing(self):
+        pool = [cli.flagging.Subject(name="Hitter", position="CF", grade=50,
+                                     war=2.0)]
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.drop_cross_role(pool, "batter")
+        self.assertEqual(out.getvalue(), "")
+
+
+class ScaleBoundsTest(unittest.TestCase):
+    def test_known_scales_map_to_their_limits(self):
+        self.assertEqual(cli.bounds_for("20 to 80"), (20.0, 80.0))
+        self.assertEqual(cli.bounds_for("1 to 100"), (1.0, 100.0))
+
+    def test_an_unknown_or_missing_scale_gives_no_bounds(self):
+        self.assertIsNone(cli.bounds_for(None))
+        self.assertIsNone(cli.bounds_for(""))
+        self.assertIsNone(cli.bounds_for("something else"))
+
+
 class GradeFloorTest(unittest.TestCase):
     """Unusable players distort the fit; --min-grade excludes them."""
 

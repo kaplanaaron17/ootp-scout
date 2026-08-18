@@ -166,5 +166,56 @@ class AnalyzeShapeTest(unittest.TestCase):
         self.assertEqual(len(analysis.findings), 4)
 
 
+class ExtrapolationTest(unittest.TestCase):
+    """A flat top bin must not send the inverse to infinity."""
+
+    def _flat_topped(self, bounds=None):
+        # Rises steadily, then all but stops - the real pitcher curve.
+        return flagging.MonotoneCurve(
+            grades=[40.0, 50.0, 60.0, 65.0, 70.0],
+            wars=[-0.8, 0.9, 1.8, 2.42, 2.48], bounds=bounds)
+
+    def test_a_nearly_flat_end_does_not_explode(self):
+        curve = self._flat_topped()
+        # 5.66 WAR against a last segment rising 0.06 over five grade points.
+        implied = curve.invert(5.66)
+        self.assertLess(implied, 200)
+
+    def test_the_extrapolation_slope_is_held_above_a_share_of_the_whole(self):
+        curve = self._flat_topped()
+        overall = curve.slope
+        self.assertGreaterEqual(curve._edge_slope(False),
+                                overall * curve.MIN_EDGE_SLOPE_SHARE)
+
+    def test_bounds_cap_the_implied_grade(self):
+        curve = self._flat_topped(bounds=(20.0, 80.0))
+        self.assertLessEqual(curve.invert(5.66), 80.0)
+        self.assertGreaterEqual(curve.invert(-40.0), 20.0)
+
+    def test_bounds_do_not_disturb_values_inside_them(self):
+        free = self._flat_topped()
+        bounded = self._flat_topped(bounds=(20.0, 80.0))
+        self.assertAlmostEqual(free.invert(1.35), bounded.invert(1.35))
+
+    def test_without_bounds_nothing_is_clamped(self):
+        curve = self._flat_topped()
+        self.assertGreater(curve.invert(20.0), 80.0)
+
+    def test_analyze_passes_bounds_through(self):
+        pool = [flagging.Subject(name=f"P{i}", position="CF",
+                                 grade=40.0 + (i % 7) * 5,
+                                 war=(i % 7) * 0.4)
+                for i in range(40)]
+        pool.append(flagging.Subject(name="Freak", position="CF", grade=70.0,
+                                     war=40.0))
+        analysis = flagging.analyze(pool, shape="monotone",
+                                    position_adjust=False,
+                                    grade_bounds=(20.0, 80.0))
+        implied = [f.implied_grade for f in analysis.findings
+                   if f.implied_grade is not None]
+        self.assertLessEqual(max(implied), 80.0)
+        self.assertGreaterEqual(min(implied), 20.0)
+
+
 if __name__ == "__main__":
     unittest.main()

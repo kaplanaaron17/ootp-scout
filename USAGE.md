@@ -218,6 +218,30 @@ That took the bias at OVR 65 from -0.71 to -0.05.
 and should not be used for this: a quadratic on the same data peaks near grade
 68 and turns downward, claiming a 75 is worse than a 65.
 
+## Implied grades that make no sense
+
+Two ways this went wrong, both now handled.
+
+**Absurd highs.** The curve is inverted to get an implied grade, and inverting
+past its top end divides by the slope of the last segment. Real pitcher data
+had a top bin rising 0.06 WAR across five grade points, so a 5.66-WAR arm came
+out at an implied **227**. Extrapolation now uses a slope held to at least half
+the curve's overall rise, and the result is clamped to what the rating scale
+can actually express — 20-80 or 1-100, taken from the league itself. Armando
+Nunez went from 227 to 80.
+
+Batters were unaffected because their top segment rises healthily; this was a
+pitcher problem, which is why it looked like pitchers were "weird".
+
+**Absurd lows.** Same mechanism at the bottom, same fix. Nothing reads below
+the scale's floor now.
+
+**Pitchers in the batting pool.** OOTP puts pitchers in a Batting Ratings
+export with their hitting ratings and their *pitching* grade. Measuring a
+pitcher's bat against a grade that describes his arm is a category error, and a
+loud one — a starter led the overrated list because of it. Players whose
+position belongs to the other role are dropped from the fit and reported.
+
 ## Multiple leagues
 
 If you play in several online leagues, each is kept separate:
