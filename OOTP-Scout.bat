@@ -22,8 +22,8 @@ set "blanks=0"
 echo.
 echo ----------------------------------------------------------------
 echo   ADD TO THE DATABASE
-echo     [1]  Full run        export -^> calculator -^> database
-echo     [2]  Prepare only    read the export, copy the paste block
+echo     [1]  Scout           export -^> database, no browser needed
+echo     [2]  Prepare only    copy a paste block for ootpcalculator.com
 echo     [3]  Record only     you have already downloaded the CSV
 echo.
 echo   USE THE DATABASE
@@ -76,18 +76,9 @@ echo    3. Report -^> Write report to disk
 echo.
 pause
 echo.
-python -m ootp_scout prepare --latest
+python -m ootp_scout flag latest --limit 15
 if errorlevel 1 goto PROBLEM
-echo.
-echo  The ratings are on your clipboard. Now, in your browser:
-echo    1. Open the projections page linked above
-echo    2. Set RATINGS SCALE to the scale reported above
-echo    3. Click BATCH INPUT, press Ctrl+V, click SUBMIT
-echo    4. Click DOWNLOAD CSV
-echo.
-pause
-echo.
-goto RECORD
+goto DONE
 
 
 :PREPARE_ONLY

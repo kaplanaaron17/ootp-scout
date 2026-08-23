@@ -28,6 +28,8 @@ class View:
     optional: tuple[str, ...]
     grade_column: str
     rating_columns: tuple[str, ...]
+    # Which export column feeds each input of the projection model.
+    projection_columns: dict = None
 
     @property
     def key(self) -> str:
@@ -59,6 +61,10 @@ VIEWS: tuple[View, ...] = (
         grade_column="OVR",
         rating_columns=("CON", "GAP", "POW", "EYE", "K's", "CON vL", "POW vL",
                         "CON vR", "POW vR", "BUN", "BFH", "SPE", "STE", "DEF"),
+        projection_columns={"contact": "CON", "gap": "GAP", "power": "POW",
+                            "eye": "EYE", "avoid_ks": "K's", "speed": "SPE",
+                            "stealing": "STE", "defense": "DEF",
+                            "babip_input": "BABIP", "steal_tendency": "SR"},
     ),
     View(
         role=BATTER, mode=POTENTIAL,
@@ -69,6 +75,11 @@ VIEWS: tuple[View, ...] = (
         grade_column="POT",
         rating_columns=("CON P", "GAP P", "POW P", "EYE P", "K P", "SPE", "STE",
                         "RUN", "DEF"),
+        projection_columns={"contact": "CON P", "gap": "GAP P",
+                            "power": "POW P", "eye": "EYE P",
+                            "avoid_ks": "K P", "speed": "SPE",
+                            "stealing": "STE", "defense": "DEF",
+                            "babip_input": "BABIP", "steal_tendency": "SR"},
     ),
     View(
         role=PITCHER, mode=CURRENT,
@@ -77,6 +88,10 @@ VIEWS: tuple[View, ...] = (
         optional=("HRA", "BABIP"),
         grade_column="OVR",
         rating_columns=("STU", "MOV", "CON", "STU vL", "STU vR", "STM", "HLD"),
+        projection_columns={"stuff": "STU", "movement": "MOV",
+                            "control": "CON", "stamina": "STM", "hold": "HLD",
+                            "ground_fly": "G/F", "hra_input": "HRA",
+                            "babip_input": "BABIP"},
     ),
     View(
         role=PITCHER, mode=POTENTIAL,
@@ -85,6 +100,10 @@ VIEWS: tuple[View, ...] = (
         optional=("HRA", "BABIP"),
         grade_column="POT",
         rating_columns=("STU P", "MOV P", "CON P", "STM", "HLD"),
+        projection_columns={"stuff": "STU P", "movement": "MOV P",
+                            "control": "CON P", "stamina": "STM",
+                            "hold": "HLD", "ground_fly": "G/F",
+                            "hra_input": "HRA", "babip_input": "BABIP"},
     ),
 )
 

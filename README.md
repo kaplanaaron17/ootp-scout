@@ -25,26 +25,33 @@ Python 3.14.
 ## What it does
 
 1. Reads a player export straight out of the game's HTML report
-2. Prepares it for [ootpcalculator.com](https://ootpcalculator.com), which
-   converts ratings into projected season stats and WAR
-3. Joins the projections back onto the export
-4. **Fits projected WAR against the scouting grade across the whole pool, and
+2. Converts ratings into projected season stats and WAR
+3. **Fits projected WAR against the scouting grade across the whole pool, and
    ranks by residual** — how far each player sits above the WAR his grade
    predicts
-5. Accumulates it all in a local database you can query during a trade
+4. Accumulates it all in a local database you can query during a trade
 
-Step 4 is the point. Ranking by raw projected WAR just re-lists the players
+Step 3 is the point. Ranking by raw projected WAR just re-lists the players
 everyone already knows are good. The residual finds the *mispriced* ones.
+
+Step 2 is a Python port of the projection maths from
+[ootpcalculator.com](https://ootpcalculator.com), whose source is MIT licensed.
+It reproduces the site to within its own display rounding — the tests assert
+that against real output — which means no browser, no clipboard, and no
+downloaded CSV. Passing a downloaded CSV still works if you would rather use
+the site directly.
 
 ## Quick start
 
 ```bash
-python -m ootp_scout prepare --latest        # reads the newest game export
-# paste into the calculator, download its CSV
-python -m ootp_scout flag latest latest      # join, rank, record
+python -m ootp_scout flag latest             # project, rank, record
 python -m ootp_scout lookup "Ted Williams"   # consult during a trade
 python -m ootp_scout compare "A, B" "C"      # weigh a hypothetical trade
+python -m ootp_scout report --out league.xlsx
 ```
+
+That first line is the whole loop: it finds the newest export the game wrote,
+projects every player, ranks them and records the lot.
 
 `OOTP-Scout.bat` wraps all of it in a menu for people who would rather not use
 a terminal. Full operational detail is in [USAGE.md](USAGE.md).
@@ -95,6 +102,10 @@ disambiguates it.
   baseline is solved so the pool's mean matches, putting both on one scale by
   construction — the per-pitcher disagreement is the signal, and a level shift
   would only obscure it.
+- **An invalid ground/fly setting.** The site accepts a numeric `G/F` and
+  returns nonsense — the same arm read 4 home runs and 9.1 WAR against 15 and
+  6.7 with a valid setting. The port refuses it instead, because reproducing
+  that faithfully would be useless.
 - **Mismatched inputs.** Pairing a report with projections from a different
   export used to fit a line through whatever few names overlapped and present
   it as a ranking. It now refuses below five matches and names both files.
@@ -105,9 +116,14 @@ disambiguates it.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-258 tests. Fixtures in `tests/fixtures/` are a real export paired with the
-projections the calculator actually returned for it, including a planted
+330 tests. Fixtures in `tests/fixtures/` are real exports paired with the
+projections the calculator actually returned for them, including a planted
 player whose tools are elite and whose grade is 35 — he must come out first.
+
+The projection port is tested against those same fixtures: every player's WAR
+must match the site to within its own display rounding, and OPS, FIP and BABIP
+to three decimals. That is the only specification worth having, since the
+port's purpose is to reproduce the site.
 
 Several tests exist because they caught real bugs: a `.xlsx` filename that
 silently wrote CSV, a quadratic fit whose inverse bailed out because its linear
@@ -124,6 +140,7 @@ and taking twenty times longer for it.
 | `reports.py` | Locating game exports and downloads on disk |
 | `flagging.py` | Least-squares fit, position offsets, residual ranking |
 | `pitching.py` | Runs-allowed WAR |
+| `projection.py` | Ratings to stats and WAR, ported from the calculator |
 | `valuation.py` | Surplus value: aging curve, discounting, $/WAR |
 | `database.py` | SQLite store, migrations, queries |
 | `spreadsheet.py` | Formatted, colour-coded workbook output |
@@ -140,3 +157,8 @@ been handled.
 ## Licence
 
 MIT.
+
+`projection.py` is a port of the projection maths from
+[danseguin23/ootp-calculator](https://github.com/danseguin23/ootp-calculator)
+by Daniel C. Seguin, used under its MIT licence. The lookup tables, estimators
+and WAR constants there are his work.

@@ -16,8 +16,8 @@ import sys
 
 from datetime import datetime
 
-from . import (clipboard, database, flagging, pitching, projections,
-               reports, spreadsheet, tables, views)
+from . import (clipboard, database, flagging, pitching, projection,
+               projections, reports, spreadsheet, tables, views)
 
 BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
@@ -83,10 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
     flag.add_argument("report", help="the same OOTP report you pasted in; the "
                                      "word 'latest' resolves to the most recent "
                                      "report OOTP wrote")
-    flag.add_argument("projections",
-                      help="the CSV downloaded from the calculator; the word "
-                           "'latest' finds the newest *-projections.csv in your "
-                           "Downloads folder")
+    flag.add_argument("projections", nargs="?", default=None,
+                      help="optional. Left out, projections are computed here "
+                           "and no browser is involved. Give a path to use a "
+                           "CSV downloaded from ootpcalculator.com instead, or "
+                           "'latest' to find the newest one in Downloads.")
     flag.add_argument("--out", help="write the flagged players here; a .xlsx "
                                     "name gets a formatted, highlighted "
                                     "spreadsheet, anything else a plain CSV")
@@ -350,6 +351,9 @@ def command_flag(args: argparse.Namespace) -> int:
     except (OSError, ValueError) as error:
         print(f"error reading {args.report}: {error}", file=sys.stderr)
         return 1
+    if args.projections is None:
+        return _flag_locally(args, report, view, rows, problems)
+
     try:
         projections_path = args.projections
         if projections_path.lower() == "latest":
@@ -403,6 +407,21 @@ def command_flag(args: argparse.Namespace) -> int:
               f"covers just those {len(subjects)}.\n", file=sys.stderr)
 
     detected_scale, _reason = views.infer_scale(rows, view)
+    return _rank_and_record(args, report, view, subjects, rows,
+                            problems + projection_problems, detected_scale,
+                            unmatched=unmatched, ungraded=ungraded,
+                            duplicates=duplicates)
+
+
+def _rank_and_record(args, report, view, subjects, rows, problems,
+                     detected_scale, header=None, unmatched=None,
+                     ungraded=None, duplicates=None) -> int:
+    """Everything after a WAR exists for each player.
+
+    Shared by both paths - projections computed here and
+    projections downloaded from the site - so the two cannot
+    drift apart in how they rank, record or report.
+    """
     subjects = drop_cross_role(subjects, view.role)
     subjects = apply_grade_floor(subjects, args.min_grade, view.grade_column)
     if len(subjects) < MIN_MATCHES:
@@ -419,8 +438,9 @@ def command_flag(args: argparse.Namespace) -> int:
     findings = flagging.select(analysis.findings, limit=args.limit,
                                min_z=args.min_z)
 
-    print(f"View: {view.ootp_view_name}   Grade column: {view.grade_column}   "
-          f"Matched: {len(subjects)} of {len(rows)} players")
+    print(header or (f"View: {view.ootp_view_name}   "
+                     f"Grade column: {view.grade_column}   "
+                     f"Matched: {len(subjects)} of {len(rows)} players"))
     for fit in analysis.fits:
         print(f"  fit[{fit.group}] n={fit.count} slope={fit.slope:+.4f} "
               f"WAR per grade point, residual sd={fit.residual_sd:.2f}"
@@ -446,13 +466,13 @@ def command_flag(args: argparse.Namespace) -> int:
             print("\nMOST OVERRATED - projecting below what their grade implies")
             print(_format_table(overrated, view.grade_column))
 
-    for label, names in (("unmatched by name", unmatched),
-                         (f"no {view.grade_column} value", ungraded),
-                         ("duplicate names, dropped", sorted(duplicates))):
+    for label, names in (("unmatched by name", unmatched or []),
+                         (f"no {view.grade_column} value", ungraded or []),
+                         ("duplicate names, dropped", sorted(duplicates or []))):
         if names:
             print(f"\n{len(names)} {label}: {', '.join(names[:8])}"
                   + (" ..." if len(names) > 8 else ""))
-    for line_number, detail in problems + projection_problems:
+    for line_number, detail in problems:
         print(f"  line {line_number}: {detail}", file=sys.stderr)
 
     if args.save:
@@ -509,6 +529,8 @@ def command_flag(args: argparse.Namespace) -> int:
             _write_csv(args.out, findings)
             print(f"\nWrote {len(findings)} rows to {args.out}")
     return 0
+
+
 
 
 def _format_table(findings: list[flagging.Finding], grade_label: str) -> str:
@@ -1033,6 +1055,64 @@ def command_compare(args: argparse.Namespace) -> int:
           "production only, not surplus value. A cheap young player and an "
           "expensive old one with the same projection look identical here.")
     return 0
+
+
+def _flag_locally(args, report, view, rows, problems) -> int:
+    """The no-browser path: project here, then rank as usual.
+
+    Same downstream handling as the site path - the only difference is where
+    the WAR came from, and the header says which so a surprising number can be
+    traced to the right place.
+    """
+    scale, reason = views.infer_scale(rows, view)
+    if scale is None:
+        print(f"error: could not work out the rating scale - {reason}.",
+              file=sys.stderr)
+        return 1
+
+    projected, trouble = projection.project_rows(rows, view, scale)
+    for name, detail in trouble[:10]:
+        print(f"  not projected - {name}: {detail}", file=sys.stderr)
+    if len(trouble) > 10:
+        print(f"  ... and {len(trouble) - 10} more", file=sys.stderr)
+    if len(projected) < MIN_MATCHES:
+        print(f"error: only {len(projected)} player(s) could be projected.",
+              file=sys.stderr)
+        return 1
+
+    by_name = {p.name.strip().lower(): p for p in projected}
+    rwar = {}
+    innings = [(p.innings, p.runs, p.war) for p in projected
+               if p.innings and p.innings > 0]
+    if innings:
+        total_ip = sum(i for i, _r, _w in innings)
+        total_r = sum(r for _i, r, _w in innings)
+        total_war = sum(w for _i, _r, w in innings)
+        baseline = ((pitching.RUNS_PER_WIN * total_war + total_r) * 9.0
+                    / total_ip)
+        for p in projected:
+            if p.innings and p.innings > 0:
+                ra9 = 9.0 * p.runs / p.innings
+                rwar[p.name.strip().lower()] = (
+                    (baseline - ra9) / pitching.RUNS_PER_WIN * p.innings / 9.0)
+
+    subjects = []
+    for row in rows:
+        found = by_name.get(row.name.strip().lower())
+        if found is None or row.grade is None:
+            continue
+        subjects.append(flagging.Subject(
+            name=row.name, position=row.position, grade=row.grade,
+            war=found.war, is_pitcher=row.is_pitcher, meta=row.meta,
+            rwar=rwar.get(row.name.strip().lower()),
+            ratings={c: row.values.get(c, "") for c in view.rating_columns}))
+
+    header = (f"View: {view.ootp_view_name}   "
+              f"Grade column: {view.grade_column}   "
+              f"Projected here: {len(subjects)} of {len(rows)} players   "
+              f"Scale: {scale}")
+    return _rank_and_record(args, report, view, subjects, rows, problems,
+                            scale, header=header)
 
 
 def command_leagues(args: argparse.Namespace) -> int:
