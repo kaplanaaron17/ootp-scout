@@ -131,6 +131,10 @@ def build_parser() -> argparse.ArgumentParser:
     flag.add_argument("--league", default=None,
                       help="which league this pool belongs to. Taken from the "
                            "save the report came out of when not given.")
+    flag.add_argument("--tag", default=None,
+                      help="label this batch, for example a draft year. "
+                           "Reports can then show just these players while "
+                           "still measuring them against the whole league.")
     flag.add_argument("--no-save", dest="save", action="store_false",
                       help="do not record this run in the database")
     flag.set_defaults(save=True)
@@ -180,6 +184,15 @@ def build_parser() -> argparse.ArgumentParser:
                     help="ignore players graded below this when fitting; a pool "
                          "full of players who would never take the field drags "
                          "the baseline down and compresses everyone above")
+    report.add_argument("--tag", default=None,
+                        help="show only players carrying this tag. The fit "
+                             "still uses everyone, so a draft class is graded "
+                             "against the league rather than against itself.")
+    report.add_argument("--fit-on-tag", action="store_true",
+                        help="with --tag, restrict the fit to those players "
+                             "too. Rarely wanted: a draft class measured "
+                             "against itself says who is best of that class, "
+                             "not whether any of them are any good.")
     report.add_argument("--team", default=None,
                         help="restrict to one organisation (partial names "
                              "match, so 'louisville' is enough)")
@@ -484,6 +497,7 @@ def _rank_and_record(args, report, view, subjects, rows, problems,
                 database.Observation(
                     name=subject.name, mode=view.mode, role=view.role,
                     league=league, scale=scale or "",
+                    tag=(args.tag or ""),
                     team=subject.meta.get("team", ""),
                     position=subject.position,
                     age=(int(subject.meta["age"])
@@ -806,12 +820,24 @@ def command_report(args: argparse.Namespace) -> int:
                       + f". Using {mode} - pass --mode to choose.",
                       file=sys.stderr)
         rows = database.latest(connection, mode=mode, role=args.role,
-                               team=args.team, league=league)
+                               team=args.team, league=league,
+                               tag=args.tag if args.fit_on_tag else None)
         # A grade floor should not discard a prospect who is unusable today
         # and excellent later, so the other mode's grade is fetched and the
         # better of the two decides. "Below 38 now and below 38 ever" is a
         # different claim from "below 38 now".
         scales = {r["scale"] for r in rows if r["scale"]}
+        tagged = set()
+        if args.tag:
+            tagged = {r["name_key"] for r in
+                      database.latest(connection, mode=mode, league=league,
+                                      tag=args.tag)}
+            if not tagged:
+                held = ", ".join(repr(t) for t, _n
+                                 in database.tags(connection, league)) or "none"
+                print(f"No players tagged {args.tag!r} in {league!r}. "
+                      f"Tags held: {held}", file=sys.stderr)
+                return 1
         other = views.POTENTIAL if mode == views.CURRENT else views.CURRENT
         best_other = {r["name_key"]: r["grade"]
                       for r in database.latest(connection, mode=other,
@@ -850,11 +876,26 @@ def command_report(args: argparse.Namespace) -> int:
                                 position_adjust=args.position_adjust,
                                 shape=args.shape,
                                 split_starters=args.split_starters, grade_bounds=grade_bounds)
-    findings = flagging.select(analysis.findings, limit=args.limit,
-                               min_z=args.min_z)
+
+    # Narrowing here rather than before the fit is the whole point of a tag:
+    # the draft class is measured against the league it is joining, and only
+    # then cut down to the players being asked about.
+    selected = analysis.findings
+    if args.tag and not args.fit_on_tag:
+        selected = [f for f in selected
+                    if f.subject.name.strip().lower() in tagged]
+        if not selected:
+            print(f"No players tagged {args.tag!r} survived the filters.",
+                  file=sys.stderr)
+            return 1
+
+    findings = flagging.select(selected, limit=args.limit, min_z=args.min_z)
 
     print(f"Database report: {league} - {len(subjects)} players, "
           f"{mode} ratings, refitted together")
+    if args.tag and not args.fit_on_tag:
+        print(f"  showing {len(selected)} tagged {args.tag!r}, measured "
+              f"against all {len(subjects)}")
     for fit in analysis.fits:
         print(f"  fit[{fit.group}] n={fit.count} slope={fit.slope:+.4f} "
               f"WAR per grade point, residual sd={fit.residual_sd:.2f}"
@@ -872,7 +913,7 @@ def command_report(args: argparse.Namespace) -> int:
 
     overrated = []
     if args.overrated > 0:
-        overrated = flagging.select_overrated(analysis.findings,
+        overrated = flagging.select_overrated(selected,
                                               limit=args.overrated)
         if overrated:
             print("\nMOST OVERRATED - projecting below what their grade implies")
@@ -882,7 +923,7 @@ def command_report(args: argparse.Namespace) -> int:
         rating_columns = sorted({key for s in subjects for key in s.ratings})
         if args.out.lower().endswith((".xlsx", ".xlsm")):
             try:
-                spreadsheet.write_xlsx(args.out, analysis.findings,
+                spreadsheet.write_xlsx(args.out, selected,
                                        analysis.fits, grade_label=grade_label,
                                        strong_z=args.highlight_z,
                                        rating_columns=rating_columns)
@@ -890,8 +931,8 @@ def command_report(args: argparse.Namespace) -> int:
                 print(f"error writing {args.out}: {error}", file=sys.stderr)
                 return 1
         else:
-            _write_csv(args.out, analysis.findings)
-        print(f"\nWrote all {len(analysis.findings)} players to {args.out}")
+            _write_csv(args.out, selected)
+        print(f"\nWrote {len(selected)} players to {args.out}")
     return 0
 
 
@@ -916,6 +957,11 @@ def command_stats(args: argparse.Namespace) -> int:
         scales = ", ".join(entry["scales"]) or "scale unknown"
         print(f"  league {entry['league']!r}: {entry['players']} players "
               f"({scales})")
+    labels = summary.get("tags") or []
+    if labels:
+        print("  tags:")
+        for name, players in labels[:10]:
+            print(f"    {name:<24} {players} players")
     held = summary.get("teams") or []
     if held:
         print(f"  {len(held)} organisation(s):")

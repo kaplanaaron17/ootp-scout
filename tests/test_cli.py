@@ -540,6 +540,84 @@ class CompareCommandTest(unittest.TestCase):
         self.assertIn("Ace Sleeper", err)
 
 
+class TagTest(unittest.TestCase):
+    """Tags label a batch - a draft class - without isolating it."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.db = os.path.join(self.folder.name, "tag.db")
+        run(["flag", REPORT, PROJECTIONS, "--overrated", "0",
+             "--league", "L", "--db", self.db])
+        run(["flag", PITCHER_REPORT, PITCHER_PROJECTIONS, "--overrated", "0",
+             "--league", "L", "--tag", "2033 draft", "--db", self.db])
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_stats_lists_the_tag(self):
+        _, out, _ = run(["stats", "--db", self.db])
+        self.assertIn("2033 draft", out)
+
+    def test_a_tagged_report_shows_only_those_players(self):
+        _, out, _ = run(["report", "--tag", "2033 draft", "--limit", "50",
+                         "--overrated", "0", "--db", self.db])
+        self.assertIn("Ace Sleeper", out)          # tagged
+        self.assertNotIn("Sleeper Sam", out)       # untagged
+
+    def test_the_fit_still_uses_everyone(self):
+        """The point of a tag: measured against the league, not itself."""
+        _, out, _ = run(["report", "--tag", "2033 draft", "--limit", "3",
+                         "--overrated", "0", "--db", self.db])
+        self.assertIn("72 players", out)           # whole league in the fit
+        self.assertIn("showing 31 tagged", out)
+
+    def test_fit_on_tag_narrows_the_fit_as_well(self):
+        _, out, _ = run(["report", "--tag", "2033 draft", "--fit-on-tag",
+                         "--limit", "3", "--overrated", "0", "--db", self.db])
+        self.assertIn("31 players", out)
+        self.assertNotIn("showing", out)
+
+    def test_an_unknown_tag_lists_what_is_held(self):
+        code, _, err = run(["report", "--tag", "nope", "--db", self.db])
+        self.assertEqual(code, 1)
+        self.assertIn("No players tagged", err)
+        self.assertIn("2033 draft", err)
+
+    def test_an_untagged_report_still_shows_everyone(self):
+        _, out, _ = run(["report", "--limit", "50", "--overrated", "0",
+                         "--db", self.db])
+        self.assertIn("Sleeper Sam", out)
+        self.assertIn("Ace Sleeper", out)
+
+    def test_the_spreadsheet_holds_only_the_tagged_players(self):
+        try:
+            import openpyxl
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = os.path.join(folder, "draft.xlsx")
+            run(["report", "--tag", "2033 draft", "--overrated", "0",
+                 "--out", destination, "--db", self.db])
+            book = openpyxl.load_workbook(destination)
+            try:
+                sheet = book["Players"]
+                names = {sheet.cell(row=r, column=2).value
+                         for r in range(2, sheet.max_row + 1)}
+            finally:
+                book.close()
+        self.assertIn("Ace Sleeper", names)
+        self.assertNotIn("Sleeper Sam", names)
+
+    def test_tags_are_scoped_to_their_league(self):
+        run(["flag", REPORT, PROJECTIONS, "--overrated", "0",
+             "--league", "Other", "--tag", "2033 draft", "--db", self.db])
+        code, out, _ = run(["report", "--league", "Other", "--tag",
+                            "2033 draft", "--limit", "3", "--overrated", "0",
+                            "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("Sleeper Sam", out)
+
+
 class MultiLeagueTest(unittest.TestCase):
     """Two leagues on different rating scales must never share a fit."""
 

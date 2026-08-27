@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS observations (
     mode              TEXT    NOT NULL,
     role              TEXT    NOT NULL,
     team              TEXT,
+    tag               TEXT,
     position          TEXT,
     age               INTEGER,
     grade             REAL,
@@ -61,6 +62,7 @@ CREATE INDEX IF NOT EXISTS observations_by_name ON observations (name_key);
 CREATE INDEX IF NOT EXISTS observations_by_mode ON observations (mode, role);
 CREATE INDEX IF NOT EXISTS observations_by_team ON observations (team);
 CREATE INDEX IF NOT EXISTS observations_by_league ON observations (league);
+CREATE INDEX IF NOT EXISTS observations_by_tag ON observations (tag);
 -- One row per player per mode per day: re-running the same export should
 -- correct that day's record rather than pile up duplicates, while a run on a
 -- later date is a genuinely new observation worth keeping.
@@ -82,6 +84,7 @@ class Observation:
     role: str
     league: str = ""
     team: str = ""
+    tag: str = ""
     position: str = ""
     age: int | None = None
     grade: float | None = None
@@ -103,7 +106,8 @@ class Observation:
 # the whole point of the store is that it accumulates over a save.
 MIGRATIONS = (("team", "TEXT"),
               ("league", "TEXT NOT NULL DEFAULT ''"),
-              ("scale", "TEXT"))
+              ("scale", "TEXT"),
+              ("tag", "TEXT"))
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
@@ -156,7 +160,8 @@ def record(connection: sqlite3.Connection, observations: list[Observation],
         values = (
             observation.league,
             observation.name_key, observation.name, observation.mode,
-            observation.role, observation.team, observation.position,
+            observation.role, observation.team, observation.tag,
+            observation.position,
             observation.age,
             observation.grade, observation.war, observation.rwar,
             observation.scouting_accuracy, observation.scale,
@@ -166,16 +171,16 @@ def record(connection: sqlite3.Connection, observations: list[Observation],
         if existing:
             connection.execute(
                 "UPDATE observations SET league=?, name_key=?, name=?, "
-                "mode=?, role=?, team=?, position=?, age=?, grade=?, war=?, "
-                "rwar=?, scouting_accuracy=?, scale=?, ratings=?, seen_at=?, "
-                "source=? WHERE id=?", values + (existing["id"],))
+                "mode=?, role=?, team=?, tag=?, position=?, age=?, grade=?, "
+                "war=?, rwar=?, scouting_accuracy=?, scale=?, ratings=?, "
+                "seen_at=?, source=? WHERE id=?", values + (existing["id"],))
             updated += 1
         else:
             connection.execute(
                 "INSERT INTO observations (league, name_key, name, mode, "
-                "role, team, position, age, grade, war, rwar, "
+                "role, team, tag, position, age, grade, war, rwar, "
                 "scouting_accuracy, scale, ratings, seen_at, source) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", values)
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", values)
             inserted += 1
     connection.commit()
     return inserted, updated
@@ -183,7 +188,8 @@ def record(connection: sqlite3.Connection, observations: list[Observation],
 
 def latest(connection: sqlite3.Connection, mode: str | None = None,
            role: str | None = None, team: str | None = None,
-           league: str | None = None) -> list[sqlite3.Row]:
+           league: str | None = None, tag: str | None = None
+           ) -> list[sqlite3.Row]:
     """The most recent observation of each player, one row per player."""
     clauses, params = [], []
     if league is not None:
@@ -195,6 +201,9 @@ def latest(connection: sqlite3.Connection, mode: str | None = None,
     if role:
         clauses.append("role = ?")
         params.append(role)
+    if tag:
+        clauses.append("LOWER(tag) = ?")
+        params.append(tag.strip().lower())
     if team:
         # Substring so "Louisville" finds it without exact-matching whatever
         # OOTP writes, and case-insensitive so the user need not match it.
@@ -261,6 +270,18 @@ def leagues(connection: sqlite3.Connection) -> list[dict[str, object]]:
     return result
 
 
+def tags(connection: sqlite3.Connection,
+         league: str | None = None) -> list[tuple[str, int]]:
+    """Every tag held, with how many players carries it."""
+    clause = "AND league = ?" if league is not None else ""
+    params = (league,) if league is not None else ()
+    rows = connection.execute(
+        f"""SELECT tag, COUNT(DISTINCT name_key) AS players
+            FROM observations WHERE tag IS NOT NULL AND tag != '' {clause}
+            GROUP BY tag ORDER BY players DESC, tag""", params).fetchall()
+    return [(row["tag"], row["players"]) for row in rows]
+
+
 def forget(connection: sqlite3.Connection, league: str) -> int:
     """Delete every observation from one league. Returns rows removed."""
     cursor = connection.execute("DELETE FROM observations WHERE league = ?",
@@ -293,6 +314,7 @@ def stats(connection: sqlite3.Connection) -> dict[str, object]:
            FROM observations GROUP BY mode, role ORDER BY mode, role""").fetchall()
     return {
         "leagues": leagues(connection),
+        "tags": tags(connection),
         "teams": teams(connection),
         "observations": row["observations"],
         "players": row["players"],

@@ -23,6 +23,7 @@ echo.
 echo ----------------------------------------------------------------
 echo   ADD TO THE DATABASE
 echo     [1]  Scout           export -^> database, no browser needed
+echo     [T]  Scout + tag     same, labelled (a draft class, say)
 echo     [2]  Prepare only    copy a paste block for ootpcalculator.com
 echo     [3]  Record only     you have already downloaded the CSV
 echo.
@@ -40,6 +41,7 @@ set "pick="
 set /p "pick=Choose: "
 
 if /i "%pick%"=="1" goto FULL
+if /i "%pick%"=="t" goto TAGGED
 if /i "%pick%"=="2" goto PREPARE_ONLY
 if /i "%pick%"=="3" goto RECORD
 if /i "%pick%"=="4" goto LOOKUP
@@ -77,6 +79,19 @@ echo.
 pause
 echo.
 python -m ootp_scout flag latest --limit 15
+if errorlevel 1 goto PROBLEM
+goto DONE
+
+
+:TAGGED
+echo.
+echo  In OOTP: switch to a Ratings view, then Report -^> Write report to disk.
+echo.
+set "label="
+set /p "label=Label for this batch (e.g. 2033 draft): "
+if "%label%"=="" goto MENU
+echo.
+python -m ootp_scout flag latest --tag "%label%" --limit 15
 if errorlevel 1 goto PROBLEM
 goto DONE
 
@@ -153,7 +168,10 @@ set /p "lg=League (blank if you only have one): "
 set "floor="
 set /p "floor=Ignore players graded below (blank for none): "
 echo.
+set "tag="
+set /p "tag=Only a tagged batch? (blank for everyone): "
 set "OPTS=--mode potential --out prospects.xlsx"
+if not "%tag%"=="" set "OPTS=%OPTS% --tag "%tag%""
 if not "%lg%"=="" set "OPTS=%OPTS% --league "%lg%""
 if not "%floor%"=="" set "OPTS=%OPTS% --min-grade %floor%"
 python -m ootp_scout report %OPTS%

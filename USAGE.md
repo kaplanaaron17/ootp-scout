@@ -262,6 +262,33 @@ curve reaches 4.94 WAR where the blended one stopped at 2.50.
 
 `--no-split-starters` puts them back together if you want to see it.
 
+## Tagging a batch, like a draft class
+
+Label an import, then report on just that batch:
+
+```bash
+python -m ootp_scout flag latest --tag "2033 draft"
+python -m ootp_scout report --tag "2033 draft" --out draft2033.xlsx
+```
+
+`stats` lists the tags held.
+
+**The fit still uses the whole league.** That is the point, and it is not a
+detail: a draft class measured against itself only tells you who is the best of
+a bad bunch. Measured against the league they are joining, an OVR 35 teenager
+whose projection implies a 63 is visible as what he is. The report says which
+it did:
+
+```
+Database report: Top Shelf - 54 players, current ratings, refitted together
+  showing 13 tagged '2033 draft', measured against all 54
+```
+
+`--fit-on-tag` restricts the fit as well, if you really do want a
+within-class ranking.
+
+Tags are scoped to a league, so the same label can be reused across saves.
+
 ## Multiple leagues
 
 If you play in several online leagues, each is kept separate:
