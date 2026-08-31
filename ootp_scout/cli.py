@@ -208,6 +208,10 @@ def build_parser() -> argparse.ArgumentParser:
                         default=spreadsheet.STRONG_Z)
     report.add_argument("--db", default=None)
 
+    window = subparsers.add_parser(
+        "gui", help="open the desktop window")
+    window.add_argument("--db", default=None)
+
     stats = subparsers.add_parser(
         "stats", help="what the database currently holds")
     stats.add_argument("--db", default=None)
@@ -1224,6 +1228,9 @@ def main(argv: list[str] | None = None) -> int:
         return command_lookup(args)
     if args.command == "report":
         return command_report(args)
+    if args.command == "gui":
+        from . import gui
+        return gui.main(args.db)
     if args.command == "stats":
         return command_stats(args)
     if args.command == "compare":

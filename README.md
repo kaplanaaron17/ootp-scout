@@ -41,6 +41,31 @@ that against real output — which means no browser, no clipboard, and no
 downloaded CSV. Passing a downloaded CSV still works if you would rather use
 the site directly.
 
+## Get it
+
+**Windows, no Python needed:** download `OOTP-Scout.exe` from the
+[latest release](https://github.com/kaplanaaron17/ootp-scout/releases) and
+double-click it. One file, nothing to install. It is not code-signed, so
+Windows warns on first run — **More info → Run anyway**.
+
+The window imports an export and shows the whole pool in a sortable, tinted
+table, with tagging, player history, trades and spreadsheet export on the
+toolbar.
+
+**From a checkout**, which also gets you the commands:
+
+```bash
+git clone https://github.com/kaplanaaron17/ootp-scout
+cd ootp-scout
+python -m ootp_scout gui          # the same window
+python build_exe.py               # rebuild the exe (needs pyinstaller)
+```
+
+Your database lives in `%LOCALAPPDATA%\ootp-scout` (or the equivalent on macOS
+and Linux), so replacing the application never touches your history.
+`OOTP_SCOUT_DB` overrides it, and a database already sitting beside a checkout
+keeps being used.
+
 ## Quick start
 
 ```bash
@@ -116,7 +141,7 @@ disambiguates it.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-330 tests. Fixtures in `tests/fixtures/` are real exports paired with the
+365 tests. Fixtures in `tests/fixtures/` are real exports paired with the
 projections the calculator actually returned for them, including a planted
 player whose tools are elite and whose grade is 35 — he must come out first.
 
@@ -144,6 +169,8 @@ and taking twenty times longer for it.
 | `valuation.py` | Surplus value: aging curve, discounting, $/WAR |
 | `database.py` | SQLite store, migrations, queries |
 | `spreadsheet.py` | Formatted, colour-coded workbook output |
+| `service.py` | The operations the window and the commands share |
+| `gui.py` | The window |
 | `cli.py` | Commands |
 
 ## Status

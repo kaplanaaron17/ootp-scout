@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ootp-scout"
+version = "1.0.0"
+description = "Find OOTP players whose projected production outruns their scouting grade"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Aaron Kaplan" }]
+requires-python = ">=3.10"
+keywords = ["ootp", "baseball", "projections", "scouting"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment :: Simulation",
+]
+
+# Nothing is required to run. openpyxl only adds spreadsheet output, and the
+# code says so rather than failing at import.
+dependencies = []
+
+[project.optional-dependencies]
+spreadsheet = ["openpyxl>=3.1"]
+build = ["pyinstaller>=6.0", "openpyxl>=3.1"]
+
+[project.scripts]
+ootp-scout = "ootp_scout.cli:main"
+
+[project.gui-scripts]
+ootp-scout-gui = "ootp_scout.gui:main"
+
+[project.urls]
+Homepage = "https://github.com/kaplanaaron17/ootp-scout"
+
+[tool.setuptools]
+packages = ["ootp_scout"]

@@ -5,3 +5,8 @@ __pycache__/
 /*.html
 /*.xlsx
 /*.db
+
+# Built application - PyInstaller regenerates all of this from build_exe.py
+/build/
+/dist/
+/*.spec

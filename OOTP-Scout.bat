@@ -35,6 +35,7 @@ echo     [7]  What is stored
 echo     [8]  List leagues
 echo     [9]  Test a trade
 echo.
+echo     [W]  Open the window
 echo     [Q]  Quit
 echo ----------------------------------------------------------------
 set "pick="
@@ -50,6 +51,7 @@ if /i "%pick%"=="6" goto PROSPECTS
 if /i "%pick%"=="7" goto STATS
 if /i "%pick%"=="8" goto LEAGUES
 if /i "%pick%"=="9" goto TRADE
+if /i "%pick%"=="w" goto WINDOW
 if /i "%pick%"=="q" goto QUIT
 
 REM A stray Enter should just redraw the menu, but if input has gone away
@@ -106,6 +108,16 @@ goto DONE
 :RECORD
 echo.
 python -m ootp_scout flag latest latest --limit 15
+if errorlevel 1 goto PROBLEM
+goto DONE
+
+
+:WINDOW
+REM The same window the built application shows. cmd waits for it, so
+REM closing the window brings the menu back.
+echo.
+echo  Opening the window. Close it to come back here.
+python -m ootp_scout gui
 if errorlevel 1 goto PROBLEM
 goto DONE
 

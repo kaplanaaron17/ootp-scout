@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -72,9 +73,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS observations_unique
 """
 
 
+def _legacy_path() -> str:
+    """Where the database lived when this was one person's script."""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        DEFAULT_FILENAME)
+
+
+def user_data_dir() -> str:
+    """Somewhere writable that survives reinstalling the application."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "ootp-scout")
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/Library/Application Support/ootp-scout")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "ootp-scout")
+
+
 def default_path() -> str:
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        DEFAULT_FILENAME)
+    """The database to use when none was named.
+
+    An existing database beside the code wins, so upgrading does not strand
+    a save's worth of history. Everything new goes to the user data directory
+    instead: an installed application must not write inside its own folder,
+    which may be read-only and will be replaced wholesale by the next version.
+    """
+    override = os.environ.get("OOTP_SCOUT_DB")
+    if override:
+        return override
+    legacy = _legacy_path()
+    if os.path.exists(legacy):
+        return legacy
+    folder = user_data_dir()
+    os.makedirs(folder, exist_ok=True)
+    return os.path.join(folder, DEFAULT_FILENAME)
 
 
 @dataclass

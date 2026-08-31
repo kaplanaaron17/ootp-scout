@@ -3,10 +3,29 @@
 Operational detail. See [README.md](README.md) for what the project is
 and why it is built the way it is.
 
-## Workflow
+## The window
 
-The calculator is a website with no API, so there is one manual paste in the
-middle. It is per *pool*, not per player — a few clicks for a whole draft class.
+Double-click **`OOTP-Scout.exe`** and you get a window: import an export, and
+the whole pool comes back in a sortable table, tinted the same way the
+spreadsheet is. The toolbar covers importing, tagging, player history, trades
+and exporting a sheet; the row under it filters by league, ratings mode, role,
+tag and grade.
+
+Nothing needs to be installed to run it — no Python, no libraries. Windows will
+warn the first time, because the file is not code-signed: **More info →
+Run anyway**.
+
+From a checkout, the same window opens with:
+
+```bash
+python -m ootp_scout gui
+```
+
+Everything below is the terminal equivalent, and does more: the window covers
+the common loop, the commands cover all of it.
+
+
+## Workflow
 
 In OOTP: pick your player list, switch to one of the ratings views below, then
 **Report → Write report to disk**. OOTP does not prompt for a location — it
@@ -14,12 +33,48 @@ writes a timestamped file into the save's own folder and opens it in your
 browser, which you can ignore. So just ask for the newest one:
 
 ```bash
+python -m ootp_scout flag latest
+```
+
+That is the whole loop. It reads OOTP's HTML directly, works out the rating
+scale, projects every player, ranks them by residual and records the lot in the
+database. No browser, no clipboard, no download.
+
+Or double-click **`OOTP-Scout.bat`**, which walks through it and returns to a
+menu afterwards rather than closing:
+
+```
+  ADD TO THE DATABASE
+    [1]  Scout           export -> database, no browser needed
+    [T]  Scout + tag     same, labelled (a draft class, say)
+    [2]  Prepare only    copy a paste block for ootpcalculator.com
+    [3]  Record only     you have already downloaded the CSV
+
+  USE THE DATABASE
+    [4]  Look up a player
+    [5]  League report   spreadsheet of one league
+    [6]  Prospect report same, graded against POT
+    [7]  What is stored
+    [8]  List leagues
+    [9]  Test a trade
+
+    [W]  Open the window
+```
+
+Recording a pool does not write a spreadsheet. Everything accumulates in the
+database, and options 5 and 6 build a sheet from it when you want one.
+
+### Using the site instead
+
+The projection maths is a port of [ootpcalculator.com](https://ootpcalculator.com),
+so the site is no longer needed — but it stays supported, in case you would
+rather see its own numbers or the port falls behind a game update.
+
+```bash
 python -m ootp_scout prepare --latest
 ```
 
-This reads OOTP's HTML directly, works out the rating scale, checks the export
-against what the calculator accepts, and puts the paste block **on your
-clipboard**. Then:
+puts the paste block **on your clipboard**. Then:
 
 1. Open the [batter](https://ootpcalculator.com/batter-projections) or
    [pitcher](https://ootpcalculator.com/pitcher-projections) projections page
@@ -36,32 +91,11 @@ The first `latest` is the newest report, the second is the newest
 If the two do not correspond, `flag` says so rather than ranking the handful
 of names that happened to overlap.
 
-Or double-click **`OOTP-Scout.bat`**, which walks through all of the above and
-returns to a menu afterwards rather than closing:
-
-```
-  ADD TO THE DATABASE
-    [1]  Full run        export -> calculator -> database
-    [2]  Prepare only    read the export, copy the paste block
-    [3]  Record only     you have already downloaded the CSV
-
-  USE THE DATABASE
-    [4]  Look up a player
-    [5]  League report   spreadsheet of one league
-    [6]  Prospect report same, graded against POT
-    [7]  What is stored
-    [8]  List leagues
-    [9]  Test a trade
-```
-
-Recording a pool no longer writes a spreadsheet. Everything accumulates in the
-database, and options 5 and 6 build a sheet from it when you want one.
-
 HTML, TSV and CSV are all accepted wherever a report is expected, so if you
 prefer to select the table in the browser and copy it yourself, paste it into a
 `.tsv` and pass that instead. `--no-copy` skips the clipboard step.
 
-Output:
+## Output
 
 ```
 View: Batting Ratings   Grade column: OVR   Matched: 41 of 41 players
