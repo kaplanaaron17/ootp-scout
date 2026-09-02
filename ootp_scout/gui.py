@@ -59,14 +59,30 @@ class ScoutWindow(tk.Tk):
         self._sort_column = None
         self._sort_reverse = False
         self._work: queue.Queue = queue.Queue()
+        self._alive = True
+        self._pump = None
+        self._busy = 0
 
         self._build_toolbar()
         self._build_filters()
         self._build_table()
         self._build_status()
 
-        self.after(100, self._drain)
+        # Closing the window has to stop the pump. Otherwise the next tick
+        # fires at widgets that are already gone, and Tcl complains about a
+        # command name rather than anything a reader could act on.
+        self.bind("<Destroy>", self._stopping)
+
+        self._pump = self.after(100, self._drain)
         self.after(200, self.refresh_sources)
+
+    def _stopping(self, event):
+        if event.widget is not self:
+            return
+        self._alive = False
+        if self._pump is not None:
+            self.after_cancel(self._pump)
+            self._pump = None
 
     # --- layout -------------------------------------------------------------
 
@@ -160,8 +176,11 @@ class ScoutWindow(tk.Tk):
         A league-sized fit takes long enough to freeze the window, and a frozen
         window reads as a crash.
         """
+        if not self._alive:
+            return
         self.status.set(busy)
         self.config(cursor="watch")
+        self._busy += 1
 
         def worker():
             try:
@@ -172,9 +191,12 @@ class ScoutWindow(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _drain(self):
+        if not self._alive:
+            return
         try:
             while True:
                 done, result, error = self._work.get_nowait()
+                self._busy -= 1
                 self.config(cursor="")
                 if error is not None:
                     self._complain(error)
@@ -182,7 +204,7 @@ class ScoutWindow(tk.Tk):
                     done(result)
         except queue.Empty:
             pass
-        self.after(100, self._drain)
+        self._pump = self.after(100, self._drain)
 
     def _complain(self, error: Exception):
         if isinstance(error, service.ScoutError):
@@ -257,7 +279,7 @@ class ScoutWindow(tk.Tk):
         self._run(work, done, f"Reading {os.path.basename(path)}…")
 
     def refresh_ranking(self):
-        options = self._options()
+        options = self._filters()
 
         def work():
             return service.rank(**options)
@@ -268,7 +290,12 @@ class ScoutWindow(tk.Tk):
 
         self._run(work, done, "Fitting…")
 
-    def _options(self) -> dict:
+    def _filters(self) -> dict:
+        """What the filter row currently says, as service.rank wants it.
+
+        Not named _options: tkinter.Misc._options is real, config() calls
+        it, and shadowing it breaks every widget update in the window.
+        """
         try:
             floor = float(self.floor.get())
         except ValueError:
@@ -291,8 +318,9 @@ class ScoutWindow(tk.Tk):
             implied = ("" if finding.implied_grade is None
                        else f"{finding.implied_grade:.0f}")
             gap = "" if finding.grade_gap is None else f"{finding.grade_gap:+.0f}"
+            tint = self._tint(finding.z_score)
             self.tree.insert(
-                "", "end", tags=(self._tint(finding.z_score),),
+                "", "end", tags=((tint,) if tint else ()),
                 values=(rank, subject.name, subject.meta.get("team", ""),
                         subject.position, subject.meta.get("age", ""),
                         f"{subject.grade:.0f}", implied, gap,
@@ -362,7 +390,7 @@ class ScoutWindow(tk.Tk):
             filetypes=[("Excel workbook", "*.xlsx"), ("CSV", "*.csv")])
         if not path:
             return
-        options = self._options()
+        options = self._filters()
         findings = list(self._results)
 
         def work():
@@ -419,7 +447,7 @@ class ScoutWindow(tk.Tk):
         get = _ask(self, "Trade", "You receive (comma separated):")
         if get is None:
             return
-        options = self._options()
+        options = self._filters()
 
         def work():
             return service.compare([n for n in give.split(",")],

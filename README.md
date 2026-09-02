@@ -141,7 +141,7 @@ disambiguates it.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-365 tests. Fixtures in `tests/fixtures/` are real exports paired with the
+374 tests. Fixtures in `tests/fixtures/` are real exports paired with the
 projections the calculator actually returned for them, including a planted
 player whose tools are elite and whose grade is 35 — he must come out first.
 
