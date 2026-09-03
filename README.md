@@ -141,7 +141,7 @@ disambiguates it.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-374 tests. Fixtures in `tests/fixtures/` are real exports paired with the
+377 tests. Fixtures in `tests/fixtures/` are real exports paired with the
 projections the calculator actually returned for them, including a planted
 player whose tools are elite and whose grade is 35 — he must come out first.
 
@@ -149,6 +149,12 @@ The projection port is tested against those same fixtures: every player's WAR
 must match the site to within its own display rounding, and OPS, FIP and BABIP
 to three decimals. That is the only specification worth having, since the
 port's purpose is to reproduce the site.
+
+`tests/test_gui.py` presses the buttons rather than importing the
+module, because the window's worst bug passed every test that did not.
+`OOTP-Scout.exe --self-check` runs a short version of that against the
+built application and writes a report, so a problem on someone else's
+machine comes back as something more useful than "it doesn't work".
 
 Several tests exist because they caught real bugs: a `.xlsx` filename that
 silently wrote CSV, a quadratic fit whose inverse bailed out because its linear

@@ -162,5 +162,47 @@ class WindowTest(unittest.TestCase):
         self.assertEqual([k for k, _m in self.said if k == "error"], [])
 
 
+@unittest.skipUnless(HAS_DISPLAY, "no display to open a window on")
+class SelfCheckTest(unittest.TestCase):
+    """`OOTP-Scout.exe --self-check` is what a stranger runs when the window
+    misbehaves, so it has to keep working when nothing else does."""
+
+    def setUp(self):
+        import run_gui
+        self.run_gui = run_gui
+        self.folder = tempfile.TemporaryDirectory()
+        self.out = os.path.join(self.folder.name, "check.txt")
+
+    def tearDown(self):
+        gc.collect()
+        self.folder.cleanup()
+
+    def read(self):
+        with open(self.out, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_passes_on_a_healthy_build(self):
+        self.assertEqual(self.run_gui.self_check(self.out), 0)
+        report = self.read()
+        self.assertNotIn("FAIL", report)
+        self.assertIn("the window opens", report)
+
+    def test_it_says_where_the_database_would_be(self):
+        self.run_gui.self_check(self.out)
+        self.assertIn("database would be:", self.read())
+
+    def test_it_catches_a_shadowed_tkinter_name(self):
+        """The bug it was written for. Put it back, and it must fail."""
+        from ootp_scout import gui
+        gui.ScoutWindow._options = lambda self: {}
+        try:
+            self.assertEqual(self.run_gui.self_check(self.out), 1)
+            report = self.read()
+            self.assertIn("FAIL", report)
+            self.assertIn("_options", report)
+        finally:
+            del gui.ScoutWindow._options
+
+
 if __name__ == "__main__":
     unittest.main()
