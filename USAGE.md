@@ -200,6 +200,62 @@ argued with rather than just trusted. Writing `.xlsx` needs `openpyxl`; a `.csv`
 name stays dependency-free.
 
 
+## Projected standings
+
+```bash
+python -m ootp_scout standings
+python -m ootp_scout standings --team "Cubs"     # that team's depth chart
+python -m ootp_scout standings --games 100       # a shorter season
+```
+
+Or press **Standings** in the window.
+
+```
+   #  Team                        W    L     WAR  Batting  Pitching
+   1  Chicago Cubs               91   71    46.0     22.1      23.9
+   2  Colorado Rockies           91   71    46.0     25.4      20.5
+  ...
+  30  St. Louis Cardinals        67   95    22.6     11.7      10.9
+```
+
+### Why it is not a sum
+
+Summing a team's projected WAR does not work, and the reason shapes the whole
+thing. **Every player is projected as a full-season major leaguer.** An
+organisation's export runs to 120-odd players, most of them in the minors, and
+charging a Low-A arm for 200 major-league innings produces team totals around
+**-300 WAR**. The numbers are not wrong; the question being asked of them is.
+
+So a roster is built instead: one player per lineup slot, five starters, eight
+relievers, five on the bench, with each one's WAR scaled to the playing time
+that slot carries. The budgets are derived, not chosen - plate appearances from
+the same league totals the projection model uses (6,014 per team over 162
+games), innings from the arithmetic of a nine-inning game (1,458).
+
+### Where the win totals come from
+
+Team WAR plus a replacement baseline, and the baseline is derived too. Every
+game has a winner, so a league's wins must total games x teams / 2. That pins
+it exactly - on a 30-team league it comes out around **45 wins**, against the
+~47 that real-world work puts it at. No constant is written down anywhere, and
+the printed table's win column really does add up to 2,430.
+
+### What it cannot know
+
+**Who is actually on the roster.** Nothing in the export says so, so the best
+player at each position is assumed to play - which on a deep farm system can
+mean a 19-year-old catcher in A-ball. `--team NAME` prints the whole depth
+chart for exactly this reason: the assumption most likely to be wrong should
+be the easiest to check.
+
+It also assumes every team stays healthy and fields its best roster all year,
+which compresses the spread. Real standings run wider than these; treat the
+order as the claim, not the exact records.
+
+Unfilled slots count as replacement level - nothing above it, which is nothing
+at all rather than a penalty. Free agents and the draft pool carry no team and
+are left off every roster.
+
 ## The database
 
 Every `flag` run records what it saw into `ootp_scout.db` (SQLite, standard

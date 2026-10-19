@@ -29,7 +29,8 @@ PITCHER_PROJECTIONS = os.path.join(FIXTURES, "pitching-projections.csv")
 # the real ootp_scout.db beside the tool, so a test run would write into the
 # user's own league data - and, as it turned out, make the suite twenty times
 # slower as that file grew. Every run is pointed at a throwaway file instead.
-_DB_COMMANDS = {"flag", "report", "lookup", "stats", "leagues", "forget"}
+_DB_COMMANDS = {"flag", "report", "lookup", "stats", "leagues", "forget",
+                "standings", "compare"}
 _SCRATCH = tempfile.TemporaryDirectory()
 
 
@@ -922,6 +923,64 @@ class GradeFloorTest(unittest.TestCase):
             code, _, err = run(["report", "--min-grade", "99", "--db", db])
         self.assertEqual(code, 1)
         self.assertIn("grade floor", err)
+
+
+
+
+class StandingsCommandTest(unittest.TestCase):
+    """`standings` reads the database, so it must never read the real one."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.db = os.path.join(self.folder.name, "standings.db")
+        from ootp_scout import service
+        service.import_export(
+            os.path.join(FIXTURES, "pool_batters_orgs.tsv"),
+            league="Demo", db=self.db)
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_it_prints_a_table(self):
+        code, out, _err = run(["standings", "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("projected standings over 162 games", out)
+        self.assertIn("Louisville Bats", out)
+
+    def test_the_wins_column_totals_the_season(self):
+        """Every game has a winner, and the printed table must show that."""
+        _code, out, _err = run(["standings", "--db", self.db])
+        wins = [float(line.split()[-4]) for line in out.splitlines()
+                if any(club in line for club in
+                       ("Louisville Bats", "Toledo Mud Hens", "Durham Bulls"))]
+        self.assertEqual(len(wins), 3)
+        self.assertAlmostEqual(sum(wins), 162 * 3 / 2, delta=1.5)
+
+    def test_a_shorter_season_is_honoured(self):
+        _code, out, _err = run(["standings", "--games", "100", "--db", self.db])
+        self.assertIn("over 100 games", out)
+
+    def test_one_team_shows_its_depth_chart(self):
+        code, out, _err = run(["standings", "--team", "louisville",
+                               "--db", self.db])
+        self.assertEqual(code, 0)
+        self.assertIn("LINEUP", out)
+        self.assertIn("ROTATION", out)
+        self.assertIn("BULLPEN", out)
+
+    def test_an_unknown_team_lists_the_real_ones(self):
+        code, _out, err = run(["standings", "--team", "Akron", "--db", self.db])
+        self.assertEqual(code, 1)
+        self.assertIn("Louisville Bats", err)
+
+    def test_an_export_without_teams_complains(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = os.path.join(folder, "noteams.db")
+            from ootp_scout import service
+            service.import_export(REPORT, league="Demo", db=db)
+            code, _out, err = run(["standings", "--db", db])
+            self.assertEqual(code, 1)
+            self.assertIn("ORG", err)
 
 
 if __name__ == "__main__":

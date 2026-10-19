@@ -105,6 +105,8 @@ class ScoutWindow(tk.Tk):
                    command=self.open_trade).pack(side="right", padx=(0, 6))
         ttk.Button(bar, text="Player history…",
                    command=self.open_history).pack(side="right", padx=(0, 6))
+        ttk.Button(bar, text="Standings",
+                   command=self.open_standings).pack(side="right", padx=(0, 6))
 
     def _build_filters(self):
         top = ttk.Frame(self, padding=(10, 0, 10, 4))
@@ -463,6 +465,38 @@ class ScoutWindow(tk.Tk):
             self.status.set(f"Wrote {len(findings)} players to {written}")
 
         self._run(work, done, "Writing the spreadsheet…")
+
+    def open_standings(self):
+        """Every team's best roster, totalled into a projected record."""
+        league = self.league.get() or None
+        seen = self.seen.get()
+        if seen not in service.SEEN_WINDOWS or seen == "any time":
+            # A roster is a snapshot. Pooling every import a save has ever had
+            # would put a traded player on both of his teams at once.
+            seen = "newest import"
+
+        def work():
+            return service.project_standings(league=league, seen=seen,
+                                             db=self.db)
+
+        def done(table):
+            lines = [f"{table.league} - projected over {table.games} games", ""]
+            lines.append(f"  {'#':>2}  {'Team':<22}{'W':>4}{'L':>5}"
+                         f"{'WAR':>7}{'Bat':>7}{'Arm':>7}")
+            for place, team in enumerate(table.teams, start=1):
+                lines.append(
+                    f"  {place:>2}  {team.team[:22]:<22}{team.wins:>4.0f}"
+                    f"{team.losses:>5.0f}{team.war:>7.1f}"
+                    f"{team.batting_war:>7.1f}{team.pitching_war:>7.1f}")
+            lines.append("")
+            lines += [f"Note: {note}" for note in table.notes]
+            lines.append("")
+            lines.append("Every team is assumed to field its best roster and "
+                         "stay healthy, so the\nspread here is narrower than "
+                         "real standings run.")
+            messagebox.showinfo(TITLE, "\n".join(lines))
+
+        self._run(work, done, "Building rosters…")
 
     def open_card(self):
         """The projected season for the selected player, in full.

@@ -216,6 +216,20 @@ def build_parser() -> argparse.ArgumentParser:
                         default=spreadsheet.STRONG_Z)
     report.add_argument("--db", default=None)
 
+    table = subparsers.add_parser(
+        "standings", help="projected standings from each team's best roster")
+    table.add_argument("--league", default=None)
+    table.add_argument("--games", type=int, default=162,
+                       help="season length (default 162)")
+    table.add_argument("--seen", default="newest import",
+                       choices=list(service.SEEN_WINDOWS),
+                       help="how recently a player must have been seen. A "
+                            "roster is a snapshot, so this defaults to the "
+                            "newest import.")
+    table.add_argument("--team", default=None,
+                       help="show this team's depth chart in full")
+    table.add_argument("--db", default=None)
+
     window = subparsers.add_parser(
         "gui", help="open the desktop window")
     window.add_argument("--db", default=None)
@@ -830,6 +844,57 @@ def _stat_rows(line: dict, is_pitcher: bool, per_row: int = 9):
                "  ".join(f"{v:>{width}}" for _h, v in chunk))
 
 
+def command_standings(args: argparse.Namespace) -> int:
+    try:
+        table = service.project_standings(league=args.league, games=args.games,
+                                          seen=args.seen, db=args.db)
+    except service.ScoutError as error:
+        print(error, file=sys.stderr)
+        return 1
+
+    if args.team:
+        wanted = args.team.strip().lower()
+        chosen = next((t for t in table.teams if wanted in t.team.lower()), None)
+        if chosen is None:
+            print(f"No team matching {args.team!r}. Teams: "
+                  + ", ".join(t.team for t in table.teams), file=sys.stderr)
+            return 1
+        print(f"{chosen.team}  {chosen.wins:.0f}-{chosen.losses:.0f}   "
+              f"{chosen.war:.1f} WAR "
+              f"({chosen.batting_war:.1f} batting, "
+              f"{chosen.pitching_war:.1f} pitching) "
+              f"from {chosen.considered} players on record\n")
+        for label, slots in (("LINEUP", chosen.lineup), ("BENCH", chosen.bench),
+                             ("ROTATION", chosen.rotation),
+                             ("BULLPEN", chosen.bullpen)):
+            print(f"  {label}")
+            for slot in slots:
+                unit = "IP" if slot.player and slot.player.is_pitcher else "PA"
+                print(f"    {slot.label:<5} {slot.name:<24} "
+                      f"season {slot.full_season_war:>6.2f}   "
+                      f"{unit} {slot.playing_time:>6.0f}   "
+                      f"-> {slot.war:>6.2f}")
+            print()
+        return 0
+
+    print(f"{table.league} - projected standings over {table.games} games\n")
+    header = (f"  {'#':>2}  {'Team':<24} {'W':>4} {'L':>4} {'WAR':>7} "
+              f"{'Batting':>8} {'Pitching':>9}")
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for place, team in enumerate(table.teams, start=1):
+        print(f"  {place:>2}  {team.team:<24} {team.wins:>4.0f} "
+              f"{team.losses:>4.0f} {team.war:>7.1f} "
+              f"{team.batting_war:>8.1f} {team.pitching_war:>9.1f}")
+    print()
+    for note in table.notes:
+        print(f"  NOTE: {note}")
+    print("\n  Every team is assumed to field its best roster and stay "
+          "healthy, which compresses\n  the spread: real standings run wider "
+          "than these. --team NAME shows who a\n  team was credited with.")
+    return 0
+
+
 def command_report(args: argparse.Namespace) -> int:
     connection = database.connect(args.db)
     try:
@@ -1263,6 +1328,8 @@ def main(argv: list[str] | None = None) -> int:
         return command_lookup(args)
     if args.command == "report":
         return command_report(args)
+    if args.command == "standings":
+        return command_standings(args)
     if args.command == "gui":
         from . import gui
         return gui.main(args.db)

@@ -13,8 +13,8 @@ import datetime as dt
 import os
 from dataclasses import dataclass, field
 
-from . import (database, flagging, pitching, projection, statline, tables,
-               views)
+from . import (database, flagging, pitching, projection, standings,
+               statline, tables, views)
 
 # Below this many players there is nothing to fit a baseline against.
 MIN_PLAYERS = 5
@@ -182,6 +182,63 @@ def seen_cutoff(connection, league: str | None, seen: str | None) -> str | None:
     return cutoff.isoformat()
 
 
+def _subjects(rows) -> list[flagging.Subject]:
+    """Database rows as the things the analysis works on."""
+    return [
+        flagging.Subject(
+            name=r["name"], position=r["position"] or "", grade=r["grade"],
+            war=r["war"], is_pitcher=r["role"] == views.PITCHER,
+            rwar=r["rwar"],
+            meta={"scouting_accuracy": r["scouting_accuracy"] or "",
+                  "age": str(r["age"]) if r["age"] is not None else "",
+                  "team": r["team"] or "",
+                  "seen": (r["seen_at"] or "")[:10]},
+            ratings=database.to_ratings(r),
+            projected=database.to_projected(r))
+        for r in rows if r["grade"] is not None and r["war"] is not None]
+
+
+def project_standings(*, league: str | None = None, games: int = 162,
+                      seen: str | None = "newest import",
+                      db: str | None = None) -> standings.Standings:
+    """Every team's best roster, totalled into a projected record.
+
+    `seen` defaults to the newest import rather than to everything, because a
+    roster is a snapshot: a player traded in March is on one team's roster and
+    not the other's, and showing him on both would double-count him.
+    """
+    connection = database.connect(db)
+    try:
+        held = database.leagues(connection)
+        if not held:
+            raise ScoutError("Nothing recorded yet - import an export first.")
+        if league is None:
+            if len(held) > 1:
+                names = ", ".join(repr(e["league"]) for e in held)
+                raise ScoutError(
+                    "This database holds several leagues, which are never "
+                    f"combined. Choose one: {names}")
+            league = held[0]["league"]
+
+        since = seen_cutoff(connection, league, seen)
+        rows = database.latest(connection, mode=views.CURRENT, league=league,
+                               seen_since=since)
+    finally:
+        connection.close()
+
+    if not rows:
+        raise ScoutError(f"Nothing recorded for {league}.")
+
+    table = standings.project_standings(_subjects(rows), league=league,
+                                        games=games)
+    if not table.teams:
+        raise ScoutError(table.notes[0] if table.notes
+                         else f"No rosters could be built for {league}.")
+    if since:
+        table.notes.insert(0, f"Rosters as of {since}.")
+    return table
+
+
 def rank(*, league: str | None = None, mode: str | None = None,
          role: str | None = None, team: str | None = None,
          tag: str | None = None, fit_on_tag: bool = False,
@@ -259,18 +316,7 @@ def rank(*, league: str | None = None, mode: str | None = None,
     finally:
         connection.close()
 
-    subjects = [
-        flagging.Subject(
-            name=r["name"], position=r["position"] or "", grade=r["grade"],
-            war=r["war"], is_pitcher=r["role"] == views.PITCHER,
-            rwar=r["rwar"],
-            meta={"scouting_accuracy": r["scouting_accuracy"] or "",
-                  "age": str(r["age"]) if r["age"] is not None else "",
-                  "team": r["team"] or "",
-                  "seen": (r["seen_at"] or "")[:10]},
-            ratings=database.to_ratings(r),
-            projected=database.to_projected(r))
-        for r in rows if r["grade"] is not None and r["war"] is not None]
+    subjects = _subjects(rows)
 
     if role:
         pitching_positions = {"SP", "RP", "CL", "P", "MR", "SR"}

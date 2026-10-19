@@ -266,6 +266,24 @@ class WindowTest(unittest.TestCase):
         self.window.open_card()
         self.assertEqual(self.said, [])
 
+    def test_the_standings_button_builds_a_table(self):
+        self.window._import(ORGS)
+        self.settle()
+        self.said.clear()
+        self.window.open_standings()
+        self.settle()
+        table = self.said[0][1]
+        self.assertIn("projected over 162 games", table)
+        self.assertIn("Louisville Bats", table)
+
+    def test_standings_without_teams_complain_rather_than_showing_zeros(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.said.clear()
+        self.window.open_standings()
+        self.settle()
+        self.assertIn("ORG", self.said[0][1])
+
     def test_every_toolbar_button_survives_being_pressed(self):
         """The bug this file exists for broke on `config`, not on the work.
 

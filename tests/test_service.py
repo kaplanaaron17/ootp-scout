@@ -316,6 +316,44 @@ class ProjectedLineTest(ServiceTest):
         self.assertEqual(result.findings[0].subject.projected, {})
 
 
+class StandingsTest(ServiceTest):
+    def test_rosters_are_built_from_what_was_imported(self):
+        self._import(ORGS)
+        table = service.project_standings(league="Demo", db=self.db)
+        self.assertEqual(len(table.teams), 3)
+        self.assertAlmostEqual(sum(t.wins for t in table.teams),
+                               162 * 3 / 2, places=6)
+
+    def test_it_defaults_to_the_newest_import(self):
+        """A roster is a snapshot, not an accumulation."""
+        self._import(ORGS)
+        table = service.project_standings(league="Demo", db=self.db)
+        self.assertIn("Rosters as of", table.notes[0])
+
+    def test_a_shorter_season_is_honoured(self):
+        self._import(ORGS)
+        table = service.project_standings(league="Demo", games=100,
+                                          db=self.db)
+        self.assertEqual(table.games, 100)
+
+    def test_an_export_with_no_teams_complains_usefully(self):
+        self._import()
+        with self.assertRaises(service.ScoutError) as caught:
+            service.project_standings(league="Demo", db=self.db)
+        self.assertIn("ORG", str(caught.exception))
+
+    def test_an_empty_database_says_so(self):
+        with self.assertRaises(service.ScoutError):
+            service.project_standings(db=self.db)
+
+    def test_it_refuses_to_choose_between_leagues(self):
+        self._import(ORGS, league="One")
+        self._import(ORGS, league="Two")
+        with self.assertRaises(service.ScoutError) as caught:
+            service.project_standings(db=self.db)
+        self.assertIn("never combined", str(caught.exception))
+
+
 class HistoryTest(ServiceTest):
     def test_finds_a_player(self):
         self._import()

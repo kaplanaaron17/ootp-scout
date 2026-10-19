@@ -131,6 +131,15 @@ disambiguates it.
   it, but the default stays "show everything" and *says* how many rows predate
   the newest import: silently hiding a player because an export was incomplete
   would be the worse failure.
+- **Team WAR is not a sum.** Every player is projected as a full-season major
+  leaguer, so adding up an organisation's 120 players - most of them in the
+  minors, each charged for a full season of major-league playing time - gives
+  team totals around -300 WAR. A depth chart is built instead, and each
+  player's WAR scaled to the playing time his slot carries. The budgets are
+  derived from the same league totals the projection model uses, and the
+  replacement baseline from the fact that a league's wins must total games x
+  teams / 2 - which lands within two wins of the published estimate without
+  anything being written down.
 - **Filtering to one club must not refit on it.** A team of 35 is too small to
   fit a curve on, and "best on this roster" is not the question being asked. So
   the club narrows what is listed while the fit still spans the league, and each
@@ -155,7 +164,7 @@ disambiguates it.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-453 tests. Fixtures in `tests/fixtures/` are real exports paired with the
+493 tests. Fixtures in `tests/fixtures/` are real exports paired with the
 projections the calculator actually returned for them, including a planted
 player whose tools are elite and whose grade is 35 — he must come out first.
 
@@ -187,6 +196,7 @@ and taking twenty times longer for it.
 | `pitching.py` | Runs-allowed WAR |
 | `projection.py` | Ratings to stats and WAR, ported from the calculator |
 | `statline.py` | Projected seasons, written the way baseball writes them |
+| `standings.py` | Depth charts, team WAR, projected records |
 | `valuation.py` | Surplus value: aging curve, discounting, $/WAR |
 | `database.py` | SQLite store, migrations, queries |
 | `spreadsheet.py` | Formatted, colour-coded workbook output |
