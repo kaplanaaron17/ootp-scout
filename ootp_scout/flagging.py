@@ -60,6 +60,9 @@ class Subject:
     rwar: float | None = None
     # The player's raw tool ratings, keyed by the export's own column names.
     ratings: dict[str, str] = field(default_factory=dict)
+    # His projected season - ERA, IP, OPS+ and the rest. Empty for a row
+    # recorded before lines were kept.
+    projected: dict[str, float] = field(default_factory=dict)
 
     @property
     def war_gap(self) -> float | None:

@@ -17,7 +17,8 @@ import sys
 from datetime import datetime
 
 from . import (clipboard, database, flagging, pitching, projection,
-               projections, reports, service, spreadsheet, tables, views)
+               projections, reports, service, spreadsheet, statline,
+               tables, views)
 
 BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
@@ -794,6 +795,16 @@ def command_lookup(args: argparse.Namespace) -> int:
                   f"{(row['war'] if row['war'] is not None else 0):>6.2f} "
                   f"{(row['scouting_accuracy'] or ''):<12} {shown}")
 
+        # The newest projection in full, which is the thing being argued over.
+        newest = records[-1] if records else None
+        line = database.to_projected(newest) if newest else {}
+        if line:
+            is_pitcher = newest["role"] == views.PITCHER
+            print(f"\n  Projected season ({newest['seen_at'][:10]})")
+            for heading, value in _stat_rows(line, is_pitcher):
+                print(f"  {heading}")
+                print(f"  {value}")
+
         # Movement between the first and last look is the reason to keep history.
         if len(records) > 1:
             first, last = records[0], records[-1]
@@ -807,6 +818,16 @@ def command_lookup(args: argparse.Namespace) -> int:
         return 0
     finally:
         connection.close()
+
+
+def _stat_rows(line: dict, is_pitcher: bool, per_row: int = 9):
+    """A stat line as alternating heading/value rows, so columns line up."""
+    pairs = statline.display(line, is_pitcher)
+    for start in range(0, len(pairs), per_row):
+        chunk = pairs[start:start + per_row]
+        width = max(max(len(h), len(v)) for h, v in chunk)
+        yield ("  ".join(f"{h:>{width}}" for h, _v in chunk),
+               "  ".join(f"{v:>{width}}" for _h, v in chunk))
 
 
 def command_report(args: argparse.Namespace) -> int:

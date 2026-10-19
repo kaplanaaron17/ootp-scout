@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS observations (
     scouting_accuracy TEXT,
     scale             TEXT,
     ratings           TEXT,
+    projected         TEXT,
     seen_at           TEXT    NOT NULL,
     source            TEXT
 );
@@ -126,6 +127,7 @@ class Observation:
     scouting_accuracy: str = ""
     scale: str = ""
     ratings: dict[str, str] | None = None
+    projected: dict[str, float] | None = None
     seen_at: str = ""
     source: str = ""
 
@@ -140,7 +142,8 @@ class Observation:
 MIGRATIONS = (("team", "TEXT"),
               ("league", "TEXT NOT NULL DEFAULT ''"),
               ("scale", "TEXT"),
-              ("tag", "TEXT"))
+              ("tag", "TEXT"),
+              ("projected", "TEXT"))
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
@@ -199,6 +202,7 @@ def record(connection: sqlite3.Connection, observations: list[Observation],
             observation.grade, observation.war, observation.rwar,
             observation.scouting_accuracy, observation.scale,
             json.dumps(observation.ratings or {}, sort_keys=True),
+            json.dumps(observation.projected or {}, sort_keys=True),
             seen_at, observation.source or source,
         )
         if existing:
@@ -206,14 +210,16 @@ def record(connection: sqlite3.Connection, observations: list[Observation],
                 "UPDATE observations SET league=?, name_key=?, name=?, "
                 "mode=?, role=?, team=?, tag=?, position=?, age=?, grade=?, "
                 "war=?, rwar=?, scouting_accuracy=?, scale=?, ratings=?, "
-                "seen_at=?, source=? WHERE id=?", values + (existing["id"],))
+                "projected=?, seen_at=?, source=? WHERE id=?",
+                values + (existing["id"],))
             updated += 1
         else:
             connection.execute(
                 "INSERT INTO observations (league, name_key, name, mode, "
                 "role, team, tag, position, age, grade, war, rwar, "
-                "scouting_accuracy, scale, ratings, seen_at, source) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", values)
+                "scouting_accuracy, scale, ratings, projected, seen_at, "
+                "source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", values)
             inserted += 1
     connection.commit()
     return inserted, updated
@@ -378,7 +384,16 @@ def stats(connection: sqlite3.Connection) -> dict[str, object]:
 
 
 def to_ratings(row: sqlite3.Row) -> dict[str, str]:
+    return _json(row, "ratings")
+
+
+def to_projected(row: sqlite3.Row) -> dict[str, float]:
+    """The projected stat line, or {} for a row recorded before they were kept."""
+    return _json(row, "projected")
+
+
+def _json(row: sqlite3.Row, column: str) -> dict:
     try:
-        return json.loads(row["ratings"] or "{}")
-    except (json.JSONDecodeError, TypeError):
+        return json.loads(row[column] or "{}")
+    except (json.JSONDecodeError, TypeError, IndexError, KeyError):
         return {}

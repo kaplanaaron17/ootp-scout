@@ -13,7 +13,8 @@ import datetime as dt
 import os
 from dataclasses import dataclass, field
 
-from . import (database, flagging, pitching, projection, tables, views)
+from . import (database, flagging, pitching, projection, statline, tables,
+               views)
 
 # Below this many players there is nothing to fit a baseline against.
 MIN_PLAYERS = 5
@@ -110,7 +111,10 @@ def import_export(path: str, *, league: str | None = None, tag: str = "",
             grade=row.grade, war=found.war,
             rwar=rwar.get(row.name.strip().lower()),
             scouting_accuracy=row.scouting_accuracy, scale=scale,
-            ratings={c: row.values.get(c, "") for c in view.rating_columns}))
+            ratings={c: row.values.get(c, "") for c in view.rating_columns},
+            projected=(statline.fields(found.line,
+                                       view.role == views.PITCHER)
+                       if found.line is not None else None)))
 
     connection = database.connect(db)
     try:
@@ -264,7 +268,8 @@ def rank(*, league: str | None = None, mode: str | None = None,
                   "age": str(r["age"]) if r["age"] is not None else "",
                   "team": r["team"] or "",
                   "seen": (r["seen_at"] or "")[:10]},
-            ratings=database.to_ratings(r))
+            ratings=database.to_ratings(r),
+            projected=database.to_projected(r))
         for r in rows if r["grade"] is not None and r["war"] is not None]
 
     if role:

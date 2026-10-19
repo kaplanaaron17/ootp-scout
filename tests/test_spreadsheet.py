@@ -16,12 +16,14 @@ _DEFAULT = object()
 
 
 def finding(name, z, position="CF", grade=50.0, war=3.0, accuracy="High",
-            ratings=None, implied=_DEFAULT):
+            ratings=None, implied=_DEFAULT, projected=None, is_pitcher=False):
     """`implied=None` means genuinely absent; omitting it derives a value."""
     subject = flagging.Subject(name=name, position=position, grade=grade,
                                war=war, meta={"scouting_accuracy": accuracy,
                                               "age": "22"},
-                               ratings=ratings or {})
+                               ratings=ratings or {},
+                               projected=projected or {},
+                               is_pitcher=is_pitcher)
     implied_grade = grade + 5 * z if implied is _DEFAULT else implied
     return flagging.Finding(subject=subject, expected_war=war - z,
                             residual=z, z_score=z, group="hitters",
@@ -164,6 +166,99 @@ class WriteXlsxTest(unittest.TestCase):
                 self.assertEqual(headers[-1], "Scouting Accuracy")
             finally:
                 book.close()
+
+
+
+
+BATTING_LINE = {"games": 150, "plate_appearances": 600, "at_bats": 540,
+                "hits": 150, "doubles": 30, "triples": 3, "home_runs": 25,
+                "walks": 55, "strikeouts": 110, "stolen_bases": 8,
+                "caught_stealing": 3, "avg": 0.278, "obp": 0.350,
+                "slg": 0.480, "ops": 0.830, "ops_plus": 125, "babip": 0.300,
+                "war": 3.0}
+PITCHING_LINE = {"games": 32, "starts": 32, "innings": 200.0, "hits": 180,
+                 "home_runs": 20, "runs": 80, "earned_runs": 75, "walks": 50,
+                 "strikeouts": 210, "era": 3.38, "whip": 1.15, "fip": 3.20,
+                 "era_plus": 120, "babip": 0.295, "war": 4.0}
+
+
+@unittest.skipIf(openpyxl is None, "openpyxl is not installed")
+class ProjectedStatsTest(unittest.TestCase):
+    """The sheet is where you scan many players at once, so the projected
+    season belongs in columns you can sort and filter, not just on a card."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def write(self, findings):
+        path = os.path.join(self.folder.name, "pool.xlsx")
+        spreadsheet.write_xlsx(path, findings, [sample_fit()],
+                               grade_label="OVR", rating_columns=[])
+        book = openpyxl.load_workbook(path)
+        self.addCleanup(book.close)
+        sheet = book["Players"]
+        headers = [cell.value for cell in sheet[1]]
+        return sheet, headers
+
+    def test_a_batting_sheet_carries_the_hitting_line(self):
+        _sheet, headers = self.write(
+            [finding("Al Alpha", 2.0, projected=BATTING_LINE)])
+        for wanted in ("PA", "AVG", "OBP", "SLG", "ISO", "BB%", "K%", "OPS+"):
+            self.assertIn(wanted, headers)
+        self.assertNotIn("ERA", headers)
+
+    def test_a_pitching_sheet_carries_era_and_innings(self):
+        _sheet, headers = self.write(
+            [finding("Arm Armstrong", 2.0, position="SP", is_pitcher=True,
+                     projected=PITCHING_LINE)])
+        for wanted in ("IP", "ERA", "FIP", "WHIP", "K/9", "BB/9", "ERA+"):
+            self.assertIn(wanted, headers)
+        self.assertNotIn("OBP", headers)
+
+    def test_a_mixed_sheet_keeps_the_two_roles_distinguishable(self):
+        """An H column means hits for a batter and hits allowed for a pitcher."""
+        _sheet, headers = self.write([
+            finding("Al Alpha", 2.0, projected=BATTING_LINE),
+            finding("Arm Armstrong", 1.0, position="SP", is_pitcher=True,
+                    projected=PITCHING_LINE),
+        ])
+        self.assertIn("H", headers)
+        self.assertIn("H (P)", headers)
+        self.assertIn("ERA", headers)
+        self.assertIn("OBP", headers)
+
+    def test_war_is_not_repeated_under_a_second_heading(self):
+        _sheet, headers = self.write(
+            [finding("Al Alpha", 2.0, projected=BATTING_LINE)])
+        self.assertEqual(headers.count("WAR"), 0)
+        self.assertIn("Projected WAR", headers)
+
+    def test_the_values_land_under_their_headings(self):
+        sheet, headers = self.write(
+            [finding("Al Alpha", 2.0, projected=BATTING_LINE)])
+        row = [cell.value for cell in sheet[2]]
+        self.assertEqual(row[headers.index("HR")], 25)
+        self.assertEqual(row[headers.index("OBP")], 0.35)
+        self.assertEqual(row[headers.index("ISO")], round(0.480 - 0.278, 3))
+
+    def test_a_pitchers_batting_cells_are_blank_not_zero(self):
+        """A zero would read as a projection; blank reads as not applicable."""
+        sheet, headers = self.write([
+            finding("Al Alpha", 2.0, projected=BATTING_LINE),
+            finding("Arm Armstrong", 1.0, position="SP", is_pitcher=True,
+                    projected=PITCHING_LINE),
+        ])
+        arm = [cell.value for cell in sheet[3]]
+        self.assertIsNone(arm[headers.index("OBP")])
+        self.assertEqual(arm[headers.index("ERA")], 3.38)
+
+    def test_a_pool_with_no_stored_lines_keeps_its_old_shape(self):
+        _sheet, headers = self.write([finding("Al Alpha", 2.0)])
+        for absent in ("PA", "AVG", "ERA", "IP"):
+            self.assertNotIn(absent, headers)
 
 
 if __name__ == "__main__":

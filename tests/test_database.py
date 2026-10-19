@@ -174,6 +174,58 @@ class StoreTest(unittest.TestCase):
     def test_migrate_is_idempotent(self):
         self.assertEqual(database.migrate(self.connection), [])
 
+    def test_a_database_without_the_projected_column_is_migrated(self):
+        """Lines were added after the first release; old stores must open."""
+        import os
+        import sqlite3
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "old.db")
+            old = sqlite3.connect(path)
+            old.execute("""CREATE TABLE observations (
+                id INTEGER PRIMARY KEY, name_key TEXT NOT NULL,
+                name TEXT NOT NULL, mode TEXT NOT NULL, role TEXT NOT NULL,
+                position TEXT, age INTEGER, grade REAL, war REAL, rwar REAL,
+                scouting_accuracy TEXT, ratings TEXT,
+                seen_at TEXT NOT NULL, source TEXT)""")
+            old.execute(
+                "INSERT INTO observations (name_key, name, mode, role, grade,"
+                " war, seen_at) VALUES ('al alpha','Al Alpha','current',"
+                "'batter', 50, 2.0, '2026-01-01T00:00:00')")
+            old.commit()
+            old.close()
+
+            connection = database.connect(path)
+            try:
+                rows = database.latest(connection)
+                self.assertEqual(len(rows), 1)
+                # Absent, not wrong: an old row simply has no line.
+                self.assertEqual(database.to_projected(rows[0]), {})
+            finally:
+                connection.close()
+
+    def test_a_projected_line_round_trips(self):
+        line = {"era": 2.85, "innings": 185.6, "strikeouts": 224}
+        database.record(self.connection,
+                        [observation("Arm Armstrong", projected=line)])
+        row = database.latest(self.connection)[0]
+        self.assertEqual(database.to_projected(row), line)
+
+    def test_re_importing_the_same_day_replaces_the_line(self):
+        database.record(self.connection,
+                        [observation("Arm Armstrong", projected={"era": 5.00})])
+        database.record(self.connection,
+                        [observation("Arm Armstrong", projected={"era": 3.10})])
+        row = database.latest(self.connection)[0]
+        self.assertEqual(database.to_projected(row), {"era": 3.10})
+
+    def test_a_corrupt_line_reads_as_empty_rather_than_raising(self):
+        database.record(self.connection, [observation("Arm Armstrong")])
+        self.connection.execute("UPDATE observations SET projected = 'not json'")
+        row = database.latest(self.connection)[0]
+        self.assertEqual(database.to_projected(row), {})
+
     def test_leagues_are_kept_apart(self):
         database.record(self.connection, [
             observation("Al Alpha", league="Top Shelf", scale="20 to 80"),

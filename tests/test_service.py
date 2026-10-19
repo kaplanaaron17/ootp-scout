@@ -277,6 +277,45 @@ class RatingsPast100Test(ServiceTest):
                 self.assertLessEqual(finding.implied_grade, 100)
 
 
+class ProjectedLineTest(ServiceTest):
+    """The projected season used to be computed and thrown away."""
+
+    def test_a_hitters_line_is_stored(self):
+        self._import()
+        result = service.rank(db=self.db)
+        line = result.findings[0].subject.projected
+        self.assertIn("obp", line)
+        self.assertIn("home_runs", line)
+        self.assertGreater(line["plate_appearances"], 0)
+
+    def test_a_pitchers_line_carries_era_and_innings(self):
+        self._import(PITCHERS)
+        result = service.rank(db=self.db)
+        line = result.findings[0].subject.projected
+        self.assertIn("era", line)
+        self.assertIn("innings", line)
+        self.assertGreater(line["innings"], 0)
+
+    def test_the_stored_war_matches_the_ranked_war(self):
+        """Two copies of the same number must not drift."""
+        self._import()
+        for finding in service.rank(db=self.db).findings:
+            self.assertAlmostEqual(finding.subject.projected["war"],
+                                   finding.subject.war, places=2)
+
+    def test_a_row_stored_before_lines_were_kept_still_ranks(self):
+        from ootp_scout import database
+
+        self._import()
+        connection = database.connect(self.db)
+        connection.execute("UPDATE observations SET projected = NULL")
+        connection.commit()
+        connection.close()
+        result = service.rank(db=self.db)
+        self.assertEqual(result.shown, 41)
+        self.assertEqual(result.findings[0].subject.projected, {})
+
+
 class HistoryTest(ServiceTest):
     def test_finds_a_player(self):
         self._import()

@@ -7,6 +7,7 @@ still works as CSV without it. It is imported inside the function so that
 
 from __future__ import annotations
 
+from . import statline
 from .flagging import Finding, GroupFit
 
 # Thresholds in standard deviations. A player's row is tinted by how far his
@@ -25,6 +26,41 @@ COLUMNS = [
 PITCHER_COLUMNS = [("rWAR", 9), ("rWAR - WAR", 13)]
 # Added after Player when the export carried an organisation column.
 TEAM_COLUMN = ("Team", 16)
+
+
+def _stat_columns(findings) -> list[tuple[str, str, int, bool]]:
+    """The projected-stat columns this sheet needs, as (key, heading, dp, pitcher).
+
+    Only roles actually present get a block, the way rWAR only appears when
+    pitchers do. WAR is left out: the sheet already carries Projected WAR, and
+    a second copy under a different heading is an invitation to compare a
+    number with itself.
+
+    A mixed sheet carries both blocks, and the pitching headings that would
+    otherwise collide are marked - an "H" column means hits for a batter and
+    hits allowed for a pitcher, which must not share a heading.
+    """
+    batters = [f for f in findings
+               if not f.subject.is_pitcher and f.subject.projected]
+    pitchers = [f for f in findings
+                if f.subject.is_pitcher and f.subject.projected]
+
+    def block(rows, layout, is_pitcher):
+        present = set()
+        for finding in rows:
+            present |= set(statline.derive(finding.subject.projected,
+                                           is_pitcher))
+        return [(key, heading, decimals, is_pitcher)
+                for key, heading, decimals in layout
+                if key in present and key != "war"]
+
+    columns = block(batters, statline.BATTER_DISPLAY, False)
+    arms = block(pitchers, statline.PITCHER_DISPLAY, True)
+    if columns and arms:
+        taken = {heading for _k, heading, _d, _p in columns}
+        arms = [(key, f"{heading} (P)" if heading in taken else heading,
+                 decimals, True) for key, heading, decimals, _p in arms]
+    return columns + arms
 
 
 class SpreadsheetUnavailable(RuntimeError):
@@ -74,6 +110,9 @@ def _write_players_sheet(sheet, findings: list[Finding], grade_label: str,
         columns.insert(columns.index(("Projected WAR", 15)) + 1,
                        PITCHER_COLUMNS[0])
     analysis_width = len(columns)
+    stat_columns = _stat_columns(findings)
+    columns += [(heading, max(7, len(heading) + 2))
+                for _k, heading, _d, _p in stat_columns]
     columns += [(name, max(7, len(name) + 2)) for name in rating_columns]
 
     headers = [name for name, _width in columns]
@@ -120,6 +159,14 @@ def _write_players_sheet(sheet, findings: list[Finding], grade_label: str,
             round(finding.z_score, 2),
             finding.scouting_accuracy,
         ]
+        stats = statline.derive(subject.projected, subject.is_pitcher)
+        for key, _heading, decimals, is_pitcher in stat_columns:
+            if is_pitcher != subject.is_pitcher:
+                values.append(None)
+                continue
+            value = stats.get(key)
+            values.append(None if value is None else round(value, decimals or 0))
+
         for column in rating_columns:
             raw = subject.ratings.get(column, "")
             try:

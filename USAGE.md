@@ -23,6 +23,8 @@ and exporting a sheet.
 | **Ignore below** | Drop players graded under this before fitting. |
 | **Find** | Hides rows whose name does not match. No refit, so it is instant. |
 
+Double-click a row for that player's full projected season — see below.
+
 **Team does not narrow the fit.** Picking your club lists your 35 players but
 still measures them against all 596 in the league, and keeps the rank each one
 holds league-wide. Ranking a club against its own roster would answer a
@@ -49,6 +51,47 @@ python -m ootp_scout gui
 
 Everything below is the terminal equivalent, and does more: the window covers
 the common loop, the commands cover all of it.
+
+
+## A player's projected season
+
+Double-click any row (or press Enter on it) and you get the full projection
+behind that row's WAR — the evidence, rather than the conclusion.
+
+For a hitter: G, PA, AB, H, 2B, 3B, HR, BB, SO, SB, CS, AVG, OBP, SLG, OPS,
+ISO, BABIP, BB%, K%, OPS+. For a pitcher: G, GS, IP, H, HR, ER, BB, SO, ERA,
+FIP, WHIP, K/9, BB/9, HR/9, K/BB, BABIP, ERA+.
+
+```
+GF EXGB
+SP  age 25
+OVR 60  implied 71  (+11)
+WAR 6.86   expected 6.77   z +1.34
+rWAR 6.57
+
+PROJECTED SEASON
+      G     GS     IP      H     HR     ER
+     30     30  185.6    147     15     59
+
+     BB     SO    ERA    FIP   WHIP    K/9
+     44    224   2.85   2.59   1.03   10.9
+
+   BB/9   HR/9   K/BB  BABIP   ERA+    WAR
+    2.1    0.7   5.09   .292    146    6.9
+```
+
+The ratios — ISO, BB%, K%, K/9, BB/9, HR/9, K/BB — are derived on display from
+the counting stats, not stored. A stored ratio is a second copy of the same
+fact, free to drift from the first.
+
+`lookup` prints the same line, and **the spreadsheet carries every stat as its
+own column**, so you can sort by projected ERA or filter on K/9 across a whole
+league. In a sheet holding both roles the pitching columns that would collide
+are marked — `H` is hits, `H (P)` is hits allowed.
+
+**Lines are only stored from the import that recorded them.** Players already
+in your database from before this existed show "Not recorded" on the card until
+you re-import that export. Nothing else about them is affected.
 
 
 ## Workflow

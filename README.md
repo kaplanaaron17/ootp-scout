@@ -29,7 +29,9 @@ Python 3.14.
 3. **Fits projected WAR against the scouting grade across the whole pool, and
    ranks by residual** — how far each player sits above the WAR his grade
    predicts
-4. Accumulates it all in a local database you can query during a trade
+4. Accumulates it all in a local database you can query during a trade, with
+   each player's full projected season — ERA, IP, FIP, WHIP, K/9 for pitchers;
+   the slash line, ISO, BB%, K% and OPS+ for hitters
 
 Step 3 is the point. Ranking by raw projected WAR just re-lists the players
 everyone already knows are good. The residual finds the *mispriced* ones.
@@ -153,7 +155,7 @@ disambiguates it.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-405 tests. Fixtures in `tests/fixtures/` are real exports paired with the
+453 tests. Fixtures in `tests/fixtures/` are real exports paired with the
 projections the calculator actually returned for them, including a planted
 player whose tools are elite and whose grade is 35 — he must come out first.
 
@@ -184,6 +186,7 @@ and taking twenty times longer for it.
 | `flagging.py` | Least-squares fit, position offsets, residual ranking |
 | `pitching.py` | Runs-allowed WAR |
 | `projection.py` | Ratings to stats and WAR, ported from the calculator |
+| `statline.py` | Projected seasons, written the way baseball writes them |
 | `valuation.py` | Surplus value: aging curve, discounting, $/WAR |
 | `database.py` | SQLite store, migrations, queries |
 | `spreadsheet.py` | Formatted, colour-coded workbook output |

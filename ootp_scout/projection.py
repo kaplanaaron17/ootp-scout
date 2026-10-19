@@ -399,12 +399,18 @@ def project_pitcher(*, stuff: float, movement: float, control: float,
 
 @dataclass
 class Projected:
-    """What the rest of the tool needs back: a WAR, plus rWAR's inputs."""
+    """What the rest of the tool needs back: a WAR, plus rWAR's inputs.
+
+    `line` is the whole projected season - ERA, IP, OPS+, the lot. It used to
+    be computed and thrown away; keeping it is what lets a player's projection
+    be shown as a stat line rather than a single number.
+    """
 
     name: str
     war: float
     innings: float | None = None
     runs: float | None = None
+    line: BatterLine | PitcherLine | None = None
 
 
 def _number(raw: str) -> float | None:
@@ -455,7 +461,8 @@ def project_rows(rows, view, scale: str,
                     babip_input=rating("babip_input"),
                     steal_tendency=rating("steal_tendency"),
                     park=park, **inputs)
-                projected.append(Projected(name=row.name, war=line.war))
+                projected.append(Projected(name=row.name, war=line.war,
+                                           line=line))
             else:
                 stuff = rating("stuff", stuff=True)
                 inputs = {name: rating(name) for name in
@@ -481,7 +488,7 @@ def project_rows(rows, view, scale: str,
                     babip_input=rating("babip_input"), park=park, **inputs)
                 projected.append(Projected(name=row.name, war=line.war,
                                            innings=line.innings,
-                                           runs=line.runs))
+                                           runs=line.runs, line=line))
         except (ValueError, KeyError) as error:
             problems.append((row.name, str(error)))
     return projected, problems

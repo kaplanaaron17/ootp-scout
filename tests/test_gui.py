@@ -27,6 +27,7 @@ except Exception:                                            # noqa: BLE001
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 BATTERS = os.path.join(FIXTURES, "pool_batters.tsv")
 ORGS = os.path.join(FIXTURES, "pool_batters_orgs.tsv")
+PITCHERS = os.path.join(FIXTURES, "groundfly_pitchers.tsv")
 
 
 @unittest.skipUnless(HAS_DISPLAY, "no display to open a window on")
@@ -206,6 +207,64 @@ class WindowTest(unittest.TestCase):
         from ootp_scout import service
         self.assertEqual(list(self.window.seen["values"]),
                          list(service.SEEN_WINDOWS))
+
+    def test_a_card_shows_the_projected_season(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window.tree.focus(self.rows()[0])
+        self.said.clear()
+        self.window.open_card()
+        card = self.said[0][1]
+        self.assertIn("Sleeper Sam", card)
+        self.assertIn("PROJECTED SEASON", card)
+        for wanted in ("PA", "AVG", "OBP", "SLG", "OPS+"):
+            self.assertIn(wanted, card)
+
+    def test_a_pitchers_card_shows_era_and_innings(self):
+        self.window._import(PITCHERS)
+        self.settle()
+        self.window.tree.focus(self.rows()[0])
+        self.said.clear()
+        self.window.open_card()
+        card = self.said[0][1]
+        for wanted in ("IP", "ERA", "FIP", "WHIP", "K/9"):
+            self.assertIn(wanted, card)
+
+    def test_a_card_also_shows_the_grade_argument_and_the_ratings(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window.tree.focus(self.rows()[0])
+        self.said.clear()
+        self.window.open_card()
+        card = self.said[0][1]
+        self.assertIn("OVR", card)
+        self.assertIn("implied", card)
+        self.assertIn("RATINGS", card)
+
+    def test_a_card_says_so_when_no_line_was_stored(self):
+        from ootp_scout import database
+
+        self.window._import(BATTERS)
+        self.settle()
+        connection = database.connect(self.window.db)
+        connection.execute("UPDATE observations SET projected = NULL")
+        connection.commit()
+        connection.close()
+        self.window.refresh_ranking()
+        self.settle()
+        self.window.tree.focus(self.rows()[0])
+        self.said.clear()
+        self.window.open_card()
+        self.assertIn("Not recorded", self.said[0][1])
+
+    def test_a_card_with_nothing_selected_does_nothing(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window.tree.selection_remove(*self.rows())
+        self.window.tree.focus("")
+        self.said.clear()
+        self.window.open_card()
+        self.assertEqual(self.said, [])
 
     def test_every_toolbar_button_survives_being_pressed(self):
         """The bug this file exists for broke on `config`, not on the work.

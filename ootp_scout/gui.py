@@ -18,7 +18,7 @@ import tkinter as tk
 import traceback
 from tkinter import filedialog, messagebox, ttk
 
-from . import reports, service, spreadsheet
+from . import reports, service, spreadsheet, statline
 
 TITLE = "OOTP Scout"
 
@@ -176,6 +176,9 @@ class ScoutWindow(tk.Tk):
                              else "center")
         for name, colour in TAGS.items():
             self.tree.tag_configure(name, background=colour)
+
+        self.tree.bind("<Double-1>", lambda _e: self.open_card())
+        self.tree.bind("<Return>", lambda _e: self.open_card())
 
         vertical = ttk.Scrollbar(frame, orient="vertical",
                                  command=self.tree.yview)
@@ -461,6 +464,60 @@ class ScoutWindow(tk.Tk):
 
         self._run(work, done, "Writing the spreadsheet…")
 
+    def open_card(self):
+        """The projected season for the selected player, in full.
+
+        A row in the table is an argument about a player's value; this is the
+        evidence behind it - the ERA and innings, or the slash line, that the
+        WAR was computed from.
+        """
+        chosen = self.tree.focus() or (self.tree.selection() or [None])[0]
+        if not chosen:
+            return
+        name = self.tree.item(chosen)["values"][1]
+        finding = next((f for f in getattr(self, "_results", [])
+                        if f.subject.name == name), None)
+        if finding is None:
+            return
+        subject = finding.subject
+
+        head = [subject.name]
+        where = "  ".join(part for part in (
+            subject.meta.get("team", ""), subject.position,
+            f"age {subject.meta.get('age')}" if subject.meta.get("age") else "",
+        ) if part)
+        if where:
+            head.append(where)
+
+        grade = [f"{self._grade_label()} {subject.grade:.0f}"]
+        if finding.implied_grade is not None:
+            grade.append(f"implied {finding.implied_grade:.0f}")
+        if finding.grade_gap is not None:
+            grade.append(f"({finding.grade_gap:+.0f})")
+        head.append("  ".join(grade))
+        head.append(f"WAR {subject.war:.2f}   expected "
+                    f"{finding.expected_war:.2f}   z {finding.z_score:+.2f}")
+        if subject.rwar is not None:
+            head.append(f"rWAR {subject.rwar:.2f}")
+        if finding.scouting_accuracy:
+            head.append(f"Scouting accuracy: {finding.scouting_accuracy}")
+
+        lines = ["", "PROJECTED SEASON"]
+        pairs = statline.display(subject.projected, subject.is_pitcher)
+        if pairs:
+            lines += _columns(pairs)
+        else:
+            lines.append("  Not recorded - re-import this export to store it.")
+
+        if subject.ratings:
+            lines += ["", "RATINGS"]
+            lines += _columns([(k, v) for k, v in subject.ratings.items() if v])
+
+        messagebox.showinfo(TITLE, "\n".join(head + lines))
+
+    def _grade_label(self) -> str:
+        return "POT" if self.mode.get() == "potential" else "OVR"
+
     def open_history(self):
         name = _ask(self, "Player history", "Player name (or part of one):")
         if not name:
@@ -529,6 +586,23 @@ class ScoutWindow(tk.Tk):
             messagebox.showinfo(TITLE, "\n".join(lines))
 
         self._run(work, done, "Weighing…")
+
+
+def _columns(pairs, per_row: int = 6) -> list[str]:
+    """Label/value pairs laid out in even columns.
+
+    A message box is a monospace-less wall of text otherwise, and a stat line
+    read as one long run of numbers is worse than no stat line.
+    """
+    width = max((len(label) for label, _v in pairs), default=0)
+    width = max(width, max((len(str(value)) for _l, value in pairs), default=0))
+    lines = []
+    for start in range(0, len(pairs), per_row):
+        chunk = pairs[start:start + per_row]
+        lines.append("  " + "  ".join(f"{label:>{width}}" for label, _v in chunk))
+        lines.append("  " + "  ".join(f"{value:>{width}}" for _l, value in chunk))
+        lines.append("")
+    return lines[:-1] if lines else lines
 
 
 def _ask(parent, title, prompt) -> str | None:
