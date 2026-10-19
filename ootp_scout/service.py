@@ -9,6 +9,7 @@ the other's output.
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 from dataclasses import dataclass, field
 
@@ -16,6 +17,17 @@ from . import (database, flagging, pitching, projection, tables, views)
 
 # Below this many players there is nothing to fit a baseline against.
 MIN_PLAYERS = 5
+
+# How recently a player must have been seen to count as still being there.
+# Keyed by what the window shows; the value is how many days back, with None
+# meaning "no cutoff" and 0 meaning "only the most recent import".
+SEEN_WINDOWS: dict[str, int | None] = {
+    "any time": None,
+    "newest import": 0,
+    "last 30 days": 30,
+    "last 90 days": 90,
+    "last year": 365,
+}
 # Rating scales, and what an implied grade may not exceed on each.
 SCALE_BOUNDS = {"20 to 80": (20.0, 80.0), "1 to 100": (1.0, 100.0),
                 "1 to 20": (1.0, 20.0), "1 to 10": (1.0, 10.0),
@@ -153,13 +165,27 @@ def teams(league: str | None = None, db: str | None = None):
         connection.close()
 
 
+def seen_cutoff(connection, league: str | None, seen: str | None) -> str | None:
+    """Turn a window label into the date a player must have been seen on."""
+    if not seen or seen not in SEEN_WINDOWS:
+        return None
+    days = SEEN_WINDOWS[seen]
+    if days is None:
+        return None
+    if days == 0:
+        return database.newest_day(connection, league)
+    cutoff = dt.date.today() - dt.timedelta(days=days)
+    return cutoff.isoformat()
+
+
 def rank(*, league: str | None = None, mode: str | None = None,
          role: str | None = None, team: str | None = None,
          tag: str | None = None, fit_on_tag: bool = False,
+         fit_on_team: bool = False,
          min_grade: float | None = None, degree: int = 1,
          shape: str = "monotone", position_adjust: bool = True,
          split_starters: bool = True, pool_roles: bool = False,
-         db: str | None = None) -> RankingResult:
+         seen: str | None = None, db: str | None = None) -> RankingResult:
     """Fit everything stored and rank it. The window's main view."""
     connection = database.connect(db)
     notes: list[str] = []
@@ -191,8 +217,40 @@ def rank(*, league: str | None = None, mode: str | None = None,
             if not tagged:
                 raise ScoutError(f"No players tagged {tag!r} in {league}.")
 
-        rows = database.latest(connection, mode=mode, role=role, team=team,
-                               league=league, tag=tag if fit_on_tag else None)
+        on_team = set()
+        if team and not fit_on_team:
+            # Who to show. The fit still spans the league, because "underrated"
+            # has to mean underrated against the league - measuring a player
+            # against his own teammates answers a different question, and a
+            # 24-man club is too few to fit anything on anyway.
+            on_team = {r["name_key"] for r in
+                       database.latest(connection, mode=mode, league=league,
+                                       team=team)}
+            if not on_team:
+                raise ScoutError(f"No players on a team matching {team!r} "
+                                 f"in {league}.")
+
+        since = seen_cutoff(connection, league, seen)
+        rows = database.latest(connection, mode=mode, role=role,
+                               team=team if fit_on_team else None,
+                               league=league, tag=tag if fit_on_tag else None,
+                               seen_since=since)
+        if since:
+            everyone = database.latest(connection, mode=mode, role=role,
+                                       team=team if fit_on_team else None,
+                                       league=league,
+                                       tag=tag if fit_on_tag else None)
+            dropped = len(everyone) - len(rows)
+            if dropped:
+                notes.append(f"Hid {dropped} player(s) not seen since {since} "
+                             "- traded, released or retired.")
+        else:
+            newest = database.newest_day(connection, league)
+            stale = sum(1 for r in rows if (r["seen_at"] or "")[:10] < newest)                 if newest else 0
+            if stale:
+                notes.append(f"{stale} player(s) were last seen before "
+                             f"{newest} and may have left. Set Seen to "
+                             "'newest import' to hide them.")
         scales = {r["scale"] for r in rows if r["scale"]}
     finally:
         connection.close()
@@ -204,7 +262,8 @@ def rank(*, league: str | None = None, mode: str | None = None,
             rwar=r["rwar"],
             meta={"scouting_accuracy": r["scouting_accuracy"] or "",
                   "age": str(r["age"]) if r["age"] is not None else "",
-                  "team": r["team"] or ""},
+                  "team": r["team"] or "",
+                  "seen": (r["seen_at"] or "")[:10]},
             ratings=database.to_ratings(r))
         for r in rows if r["grade"] is not None and r["war"] is not None]
 
@@ -249,6 +308,11 @@ def rank(*, league: str | None = None, mode: str | None = None,
                     if f.subject.name.strip().lower() in tagged]
         notes.append(f"Showing {len(findings)} tagged {tag!r}, measured "
                      f"against all {len(subjects)}.")
+    if team and not fit_on_team:
+        findings = [f for f in findings
+                    if f.subject.name.strip().lower() in on_team]
+        notes.append(f"Showing {len(findings)} on {team}, measured against "
+                     f"all {len(subjects)} in the league.")
 
     return RankingResult(
         league=league, mode=mode,

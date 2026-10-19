@@ -8,8 +8,34 @@ and why it is built the way it is.
 Double-click **`OOTP-Scout.exe`** and you get a window: import an export, and
 the whole pool comes back in a sortable table, tinted the same way the
 spreadsheet is. The toolbar covers importing, tagging, player history, trades
-and exporting a sheet; the row under it filters by league, ratings mode, role,
-tag and grade.
+and exporting a sheet.
+
+### The filters
+
+| Control | What it does |
+| --- | --- |
+| **League** | Which league. Never combined, because their scales differ. |
+| **Team** | One club. Narrows who is **listed**, not who they are measured against - see below. |
+| **Ratings** | Current (OVR) or potential (POT). |
+| **Role** | Batters or pitchers. |
+| **Group** | One tagged batch - a draft class, a free agent list, a Rule 5 pool. |
+| **Seen** | How recently a player has to have been seen to still count. |
+| **Ignore below** | Drop players graded under this before fitting. |
+| **Find** | Hides rows whose name does not match. No refit, so it is instant. |
+
+**Team does not narrow the fit.** Picking your club lists your 35 players but
+still measures them against all 596 in the league, and keeps the rank each one
+holds league-wide. Ranking a club against its own roster would answer a
+different question - who is best on this team - and 35 players is too few to
+fit anything on. (`report --team` on the command line does fit inside the club,
+and says so; the window deliberately does not.)
+
+**Seen is how you drop players you no longer have.** Every import is kept, so a
+player's last sighting is still his latest one - which means someone traded
+away keeps appearing on the team he was last seen playing for, forever. Set
+Seen to **newest import** and only players in your most recent export are
+listed. The window says how many it hid, and when Seen is "any time" it warns
+how many rows are older than the newest import.
 
 Nothing needs to be installed to run it — no Python, no libraries. Windows will
 warn the first time, because the file is not code-signed: **More info →
@@ -296,16 +322,26 @@ curve reaches 4.94 WAR where the blended one stopped at 2.50.
 
 `--no-split-starters` puts them back together if you want to see it.
 
-## Tagging a batch, like a draft class
+## Groups: a draft class, a free agent list, a Rule 5 pool
 
-Label an import, then report on just that batch:
+A **group** is a labelled import. It is how you look at one pool of players
+without the rest of the league in front of you.
+
+In the window: type the label into the **Tag** box on the toolbar *before* you
+import, then pick it from **Group** afterwards. On the command line:
 
 ```bash
 python -m ootp_scout flag latest --tag "2033 draft"
 python -m ootp_scout report --tag "2033 draft" --out draft2033.xlsx
 ```
 
-`stats` lists the tags held.
+The label is whatever you want — `2033 draft`, `FA class`, `rule 5`,
+`waiver wire`. One export per group: in OOTP, open that list (the draft pool,
+the free agent list, the Rule 5 eligibles), switch to a ratings view, write the
+report, then import it with the label typed in.
+
+`stats` lists the groups held, and the window's Group picker shows each with
+how many players it holds.
 
 **The fit still uses the whole league.** That is the point, and it is not a
 detail: a draft class measured against itself only tells you who is the best of
@@ -453,9 +489,15 @@ site's RATINGS SCALE dropdown to what it says. `--scale` overrides it.
 
 The tell is arithmetic: OOTP's 20-80 display rounds to the nearest grade, so
 every rating lands on a multiple of 5, while a 1-100 export produces off-grid
-values almost immediately. Note that OOTP shows some ratings above the nominal
-top of the 20-80 scale — a 90 Stealing turns up in real exports — so the
-detector allows up to 95, matching the calculator's own limit.
+values almost immediately.
+
+**Ratings above the top of the scale are normal and are accepted.** OOTP shows
+a 90 Stealing on the 20-80 scale, and 1-100 leagues show ratings past 100. The
+ceiling is not the scale's name but the calculator's own limit — 250 on its
+internal scale — which works out to **95 for 20-80 and 124.75 for 1-100**.
+Both are derived rather than written down, so neither can drift from the maths
+that produced them. A 1-100 league that displays a 113 imports normally; only
+something past 124.75 is refused, and the refusal says what the limit is.
 
 If you have a choice, 1-100 carries more resolution than 20-80 and makes the
 residual ranking finer — a 20-80 pool puts many players on identical grades,

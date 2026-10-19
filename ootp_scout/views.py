@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .projection import scale_ceiling
+
 BATTER = "batter"
 PITCHER = "pitcher"
 CURRENT = "current"
@@ -247,12 +249,13 @@ def parse_rows(headers: list[str], rows: list[list[str]], view: View
 
 SCALE_1_100 = "1 to 100"
 
-# OOTP shows some ratings above the nominal top of the 20-80 scale - a 90
-# Stealing turns up in real exports. The calculator normalizes a rating to
-# 200*(value-low)/(high-low) and rejects beyond 250, which on 20-80 permits
-# values up to 95. Matching its ceiling rather than the nominal 80 keeps a
-# single fast baserunner from being read as a different scale entirely.
-SCALE_STEP_5_CEILING = 95.0
+# OOTP shows ratings above a scale's nominal top: a 90 Stealing on the 20-80
+# scale, and values past 100 on the 1-100 one. Matching the calculator's own
+# ceiling rather than the nominal top keeps one fast baserunner from being
+# read as a different scale entirely - and keeps a 1-100 league that shows a
+# 105 from being refused outright. See projection.scale_ceiling.
+SCALE_STEP_5_CEILING = scale_ceiling(SCALE_STEP_5)
+SCALE_1_100_CEILING = scale_ceiling(SCALE_1_100)
 
 
 def rating_values(rows: list[ExportRow], view: View) -> list[float]:
@@ -280,19 +283,25 @@ def infer_scale(rows: list[ExportRow], view: View) -> tuple[str | None, str]:
         return None, "no rating values found"
 
     low, high = min(values), max(values)
-    if high > 100 or low < 0:
-        return None, f"values span {low:g}-{high:g}, which matches no OOTP scale"
+    if high > SCALE_1_100_CEILING or low < 0:
+        return None, (f"values span {low:g}-{high:g}, which matches no OOTP "
+                      f"scale - the highest any of them carries is "
+                      f"{SCALE_1_100_CEILING:g}")
 
     off_grid = [v for v in values if v % 5 != 0]
     if not off_grid and low >= 20 and high <= SCALE_STEP_5_CEILING:
         note = "" if high <= 80 else f" (top rating {high:g})"
         return SCALE_STEP_5, (f"every rating is a multiple of 5, from {low:g} "
                               f"up{note} - {len(values)} values checked")
-    if high <= 100:
-        share = len(off_grid) / len(values)
-        return SCALE_1_100, (f"{share:.0%} of ratings are not multiples of 5, "
-                             f"so this is not a 20-80 export")
-    return None, "could not tell"
+    share = len(off_grid) / len(values)
+    if not off_grid:
+        # Every value is a multiple of five, but one sits above what 20-80 can
+        # carry. That is a 1-100 league whose top ratings have run past 100.
+        return SCALE_1_100, (f"every rating is a multiple of 5, but {high:g} "
+                             f"is above the {SCALE_STEP_5_CEILING:g} that "
+                             f"20-80 can carry")
+    return SCALE_1_100, (f"{share:.0%} of ratings are not multiples of 5, "
+                         f"so this is not a 20-80 export")
 
 
 def validate_ratings(rows: list[ExportRow], view: View, scale: str

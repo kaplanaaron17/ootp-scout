@@ -36,6 +36,7 @@ COLUMNS = [
     ("diff", "Diff", 60),
     ("z", "z", 50),
     ("scouting", "Scouting", 90),
+    ("seen", "Seen", 85),
 ]
 
 # Row tints, matching the spreadsheet so the two read alike.
@@ -106,39 +107,59 @@ class ScoutWindow(tk.Tk):
                    command=self.open_history).pack(side="right", padx=(0, 6))
 
     def _build_filters(self):
-        row = ttk.Frame(self, padding=(10, 0, 10, 8))
-        row.pack(fill="x")
+        top = ttk.Frame(self, padding=(10, 0, 10, 4))
+        top.pack(fill="x")
+        bottom = ttk.Frame(self, padding=(10, 0, 10, 8))
+        bottom.pack(fill="x")
 
-        def label(text):
-            ttk.Label(row, text=text).pack(side="left", padx=(0, 4))
+        def label(parent, text):
+            ttk.Label(parent, text=text).pack(side="left", padx=(0, 4))
 
-        label("League")
-        self.league = ttk.Combobox(row, width=20, state="readonly")
+        label(top, "League")
+        self.league = ttk.Combobox(top, width=20, state="readonly")
         self.league.pack(side="left", padx=(0, 12))
-        self.league.bind("<<ComboboxSelected>>", lambda _e: self.refresh_tags())
+        self.league.bind("<<ComboboxSelected>>",
+                         lambda _e: self.refresh_choices())
 
-        label("Ratings")
-        self.mode = ttk.Combobox(row, width=10, state="readonly",
+        label(top, "Team")
+        self.team = ttk.Combobox(top, width=24, state="readonly")
+        self.team.pack(side="left", padx=(0, 12))
+
+        label(top, "Ratings")
+        self.mode = ttk.Combobox(top, width=10, state="readonly",
                                  values=["current", "potential"])
         self.mode.set("current")
         self.mode.pack(side="left", padx=(0, 12))
 
-        label("Role")
-        self.role = ttk.Combobox(row, width=9, state="readonly",
+        label(top, "Role")
+        self.role = ttk.Combobox(top, width=9, state="readonly",
                                  values=["all", "batter", "pitcher"])
         self.role.set("all")
-        self.role.pack(side="left", padx=(0, 12))
+        self.role.pack(side="left")
 
-        label("Tag")
-        self.tag = ttk.Combobox(row, width=16, state="readonly")
+        label(bottom, "Group")
+        self.tag = ttk.Combobox(bottom, width=20, state="readonly")
         self.tag.pack(side="left", padx=(0, 12))
 
-        label("Ignore below")
-        self.floor = ttk.Spinbox(row, width=5, from_=0, to=100, increment=5)
+        label(bottom, "Seen")
+        self.seen = ttk.Combobox(bottom, width=14, state="readonly",
+                                 values=list(service.SEEN_WINDOWS))
+        self.seen.set("any time")
+        self.seen.pack(side="left", padx=(0, 12))
+
+        label(bottom, "Ignore below")
+        self.floor = ttk.Spinbox(bottom, width=5, from_=0, to=100, increment=5)
         self.floor.set(0)
         self.floor.pack(side="left", padx=(0, 12))
 
-        ttk.Button(row, text="Show", command=self.refresh_ranking).pack(
+        label(bottom, "Find")
+        self.find = ttk.Entry(bottom, width=18)
+        self.find.pack(side="left", padx=(0, 12))
+        # Filtering by name only hides rows, so it needs no refit - redrawing
+        # from the findings already in hand is instant.
+        self.find.bind("<KeyRelease>", lambda _e: self._redraw())
+
+        ttk.Button(bottom, text="Show", command=self.refresh_ranking).pack(
             side="left")
 
     def _build_table(self):
@@ -225,7 +246,7 @@ class ScoutWindow(tk.Tk):
             self.league["values"] = names
             if names and not self.league.get():
                 self.league.set(names[0])
-            self.refresh_tags()
+            self.refresh_choices()
             if names:
                 self.refresh_ranking()
             else:
@@ -233,12 +254,20 @@ class ScoutWindow(tk.Tk):
 
         self._run(work, done, "Reading the database…")
 
-    def refresh_tags(self):
+    def refresh_choices(self):
+        """Repopulate the per-league pickers. Teams and groups both move."""
         league = self.league.get() or None
+
         held = service.tags(league, self.db)
-        self.tag["values"] = [""] + [t for t, _n in held]
+        self.tag["values"] = ["(everyone)"] + [f"{t}  ({n})" for t, n in held]
         if self.tag.get() not in self.tag["values"]:
-            self.tag.set("")
+            self.tag.set("(everyone)")
+
+        clubs = service.teams(league, self.db)
+        self.team["values"] = (["(all teams)"]
+                               + [f"{t}  ({n})" for t, n in clubs])
+        if self.team.get() not in self.team["values"]:
+            self.team.set("(all teams)")
 
     def import_latest(self):
         try:
@@ -301,20 +330,55 @@ class ScoutWindow(tk.Tk):
         except ValueError:
             floor = 0.0
         role = self.role.get()
-        tag = self.tag.get().strip()
+        seen = self.seen.get()
         return {
             "league": self.league.get() or None,
             "mode": self.mode.get() or None,
             "role": None if role == "all" else role,
-            "tag": tag or None,
+            "team": self._chosen(self.team, "(all teams)"),
+            "tag": self._chosen(self.tag, "(everyone)"),
+            "seen": seen if seen in service.SEEN_WINDOWS else None,
             "min_grade": floor if floor > 0 else None,
             "db": self.db,
         }
 
+    @staticmethod
+    def _chosen(box, placeholder: str) -> str | None:
+        """A picker's value without the count the label carries."""
+        value = box.get().strip()
+        if not value or value == placeholder:
+            return None
+        return value.rsplit("  (", 1)[0].strip() or None
+
     def _fill(self, result: service.RankingResult):
+        self._result = result
+        self._redraw()
+
+        summary = (f"{result.league} - {result.grade_label} - "
+                   f"{result.shown} shown, fitted on {result.fitted_on}")
+        for fit in result.fits:
+            summary += (f"   |   {fit.group}: {fit.count} players, "
+                        f"{fit.slope:+.3f} WAR per point")
+        if result.notes:
+            summary += "   |   " + "  ".join(result.notes)
+        self.status.set(summary)
+
+    def _redraw(self):
+        """Put the findings in hand on screen, minus anything Find excludes.
+
+        Rank numbers stay those of the full ranking: a player is the 14th most
+        underrated in his league whether or not the other thirteen are on
+        screen, and renumbering him 1 would say something untrue.
+        """
+        result = getattr(self, "_result", None)
         self.tree.delete(*self.tree.get_children())
+        if result is None:
+            return
+        wanted = self.find.get().strip().lower()
         for rank, finding in enumerate(result.findings, start=1):
             subject = finding.subject
+            if wanted and wanted not in subject.name.lower():
+                continue
             implied = ("" if finding.implied_grade is None
                        else f"{finding.implied_grade:.0f}")
             gap = "" if finding.grade_gap is None else f"{finding.grade_gap:+.0f}"
@@ -326,16 +390,8 @@ class ScoutWindow(tk.Tk):
                         f"{subject.grade:.0f}", implied, gap,
                         f"{subject.war:.2f}", f"{finding.expected_war:.2f}",
                         f"{finding.residual:+.2f}", f"{finding.z_score:.2f}",
-                        finding.scouting_accuracy))
-
-        summary = (f"{result.league} - {result.grade_label} - "
-                   f"{result.shown} shown, fitted on {result.fitted_on}")
-        for fit in result.fits:
-            summary += (f"   |   {fit.group}: {fit.count} players, "
-                        f"{fit.slope:+.3f} WAR per point")
-        if result.notes:
-            summary += "   |   " + "  ".join(result.notes)
-        self.status.set(summary)
+                        finding.scouting_accuracy,
+                        subject.meta.get("seen", "")))
 
     @staticmethod
     def _tint(z: float) -> str:
@@ -362,7 +418,8 @@ class ScoutWindow(tk.Tk):
         text = {"name": lambda f: f.subject.name.lower(),
                 "team": lambda f: (f.subject.meta.get("team") or "").lower(),
                 "position": lambda f: f.subject.position,
-                "scouting": lambda f: f.scouting_accuracy}
+                "scouting": lambda f: f.scouting_accuracy,
+                "seen": lambda f: f.subject.meta.get("seen") or ""}
         key = numeric.get(column) or text.get(column)
         if key is None:
             return
@@ -372,13 +429,11 @@ class ScoutWindow(tk.Tk):
         self._sort_column = column
         self._results = sorted(self._results, key=key,
                                reverse=self._sort_reverse)
-        result = service.RankingResult(
+        self._result = service.RankingResult(
             league=self.league.get(), mode=self.mode.get(),
             grade_label="POT" if self.mode.get() == "potential" else "OVR",
             findings=self._results, shown=len(self._results))
-        current = self.status.get()
-        self._fill(result)
-        self.status.set(current)
+        self._redraw()
 
     def export_spreadsheet(self):
         if not self._results:

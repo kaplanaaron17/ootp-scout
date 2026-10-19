@@ -217,6 +217,38 @@ class InferScaleTest(unittest.TestCase):
         self.assertIsNone(scale)
         self.assertIn("matches no OOTP scale", reason)
 
+    def test_a_1_100_league_whose_ratings_run_past_100_is_accepted(self):
+        """Some 1-100 leagues display above 100, the way 20-80 shows a 90.
+
+        This used to be refused outright - "matches no OOTP scale" - which
+        made the tool unusable for such a league. The calculator itself takes
+        them: on 1-100 it accepts up to 124.75.
+        """
+        rows = self._rows([103] * 14, [67] * 14, [48] * 14)
+        scale, reason = views.infer_scale(rows, self.view)
+        self.assertEqual(scale, views.SCALE_1_100)
+        self.assertNotIn("matches no OOTP scale", reason)
+
+    def test_past_100_and_all_multiples_of_five_is_still_1_100(self):
+        """The awkward case: grade-like values that 20-80 cannot carry."""
+        rows = self._rows([105] * 14, [80] * 14, [45] * 14)
+        scale, reason = views.infer_scale(rows, self.view)
+        self.assertEqual(scale, views.SCALE_1_100)
+        self.assertIn("105", reason)
+
+    def test_the_ceiling_is_the_calculators_and_not_the_nominal_top(self):
+        from ootp_scout.projection import scale_ceiling
+        self.assertEqual(views.SCALE_STEP_5_CEILING, 95.0)
+        self.assertEqual(views.SCALE_1_100_CEILING,
+                         scale_ceiling(views.SCALE_1_100))
+        self.assertAlmostEqual(views.SCALE_1_100_CEILING, 124.75)
+
+    def test_beyond_even_that_ceiling_is_still_refused(self):
+        rows = self._rows([130] * 14)
+        scale, reason = views.infer_scale(rows, self.view)
+        self.assertIsNone(scale)
+        self.assertIn("124.75", reason)
+
     def test_no_ratings_returns_none(self):
         rows = self._rows()
         scale, reason = views.infer_scale(rows, self.view)

@@ -26,6 +26,7 @@ except Exception:                                            # noqa: BLE001
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 BATTERS = os.path.join(FIXTURES, "pool_batters.tsv")
+ORGS = os.path.join(FIXTURES, "pool_batters_orgs.tsv")
 
 
 @unittest.skipUnless(HAS_DISPLAY, "no display to open a window on")
@@ -146,6 +147,66 @@ class WindowTest(unittest.TestCase):
         self.assertTrue(self.said)
         self.assertEqual(self.said[0][0], "info")
 
+    def test_the_team_picker_lists_the_clubs_held(self):
+        self.window._import(ORGS)
+        self.settle()
+        values = list(self.window.team["values"])
+        self.assertEqual(values[0], "(all teams)")
+        self.assertTrue(any("Louisville Bats" in v for v in values))
+
+    def test_choosing_a_club_narrows_the_table_to_it(self):
+        self.window._import(ORGS)
+        self.settle()
+        everyone = len(self.rows())
+        club = next(v for v in self.window.team["values"]
+                    if v.startswith("Louisville"))
+        self.window.team.set(club)
+        self.window.refresh_ranking()
+        self.settle()
+        self.assertLess(len(self.rows()), everyone)
+        clubs = {self.window.tree.item(r)["values"][2] for r in self.rows()}
+        self.assertEqual(clubs, {"Louisville Bats"})
+
+    def test_the_count_on_a_picker_is_not_sent_as_a_filter(self):
+        """The pickers read 'Louisville Bats  (14)'; the filter is the name."""
+        self.window.team.set("Louisville Bats  (14)")
+        self.assertEqual(self.window._filters()["team"], "Louisville Bats")
+        self.window.team.set("(all teams)")
+        self.assertIsNone(self.window._filters()["team"])
+
+    def test_find_hides_rows_without_refitting(self):
+        self.window._import(BATTERS)
+        self.settle()
+        everyone = len(self.rows())
+        self.window.find.insert(0, "sleeper")
+        self.window._redraw()
+        self.assertEqual(len(self.rows()), 1)
+        self.assertIn("Sleeper Sam",
+                      self.window.tree.item(self.rows()[0])["values"])
+        self.window.find.delete(0, "end")
+        self.window._redraw()
+        self.assertEqual(len(self.rows()), everyone)
+
+    def test_find_keeps_the_rank_a_player_actually_holds(self):
+        """Showing one player must not renumber him as the most underrated."""
+        self.window._import(BATTERS)
+        self.settle()
+        third = self.window.tree.item(self.rows()[2])["values"][1]
+        self.window.find.insert(0, third)
+        self.window._redraw()
+        self.assertEqual(self.window.tree.item(self.rows()[0])["values"][0], 3)
+
+    def test_the_seen_date_is_shown(self):
+        self.window._import(BATTERS)
+        self.settle()
+        seen = self.window.tree.item(self.rows()[0])["values"][-1]
+        self.assertRegex(str(seen), r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_the_seen_picker_offers_the_service_windows(self):
+        from ootp_scout import service
+        self.assertEqual(list(self.window.seen["values"]),
+                         list(service.SEEN_WINDOWS))
+
     def test_every_toolbar_button_survives_being_pressed(self):
         """The bug this file exists for broke on `config`, not on the work.
 
@@ -156,7 +217,7 @@ class WindowTest(unittest.TestCase):
         self.settle()
         self.window.refresh_sources()
         self.settle()
-        self.window.refresh_tags()
+        self.window.refresh_choices()
         self.window.refresh_ranking()
         self.settle()
         self.assertEqual([k for k, _m in self.said if k == "error"], [])

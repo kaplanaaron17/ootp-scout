@@ -219,12 +219,32 @@ def record(connection: sqlite3.Connection, observations: list[Observation],
     return inserted, updated
 
 
+def newest_day(connection: sqlite3.Connection,
+               league: str | None = None) -> str | None:
+    """The date of the most recent import, as YYYY-MM-DD."""
+    clause = "WHERE league = ?" if league is not None else ""
+    params = (league,) if league is not None else ()
+    row = connection.execute(
+        f"SELECT MAX(substr(seen_at, 1, 10)) AS day FROM observations {clause}",
+        params).fetchone()
+    return row["day"] if row and row["day"] else None
+
+
 def latest(connection: sqlite3.Connection, mode: str | None = None,
            role: str | None = None, team: str | None = None,
-           league: str | None = None, tag: str | None = None
-           ) -> list[sqlite3.Row]:
-    """The most recent observation of each player, one row per player."""
+           league: str | None = None, tag: str | None = None,
+           seen_since: str | None = None) -> list[sqlite3.Row]:
+    """The most recent observation of each player, one row per player.
+
+    `seen_since` (a YYYY-MM-DD date) drops players not seen on or after it.
+    Without it a player who has left - traded, released, retired - keeps
+    showing up forever on whatever team he was last seen playing for, because
+    his last observation is still his latest one.
+    """
     clauses, params = [], []
+    if seen_since:
+        clauses.append("substr(seen_at, 1, 10) >= ?")
+        params.append(seen_since)
     if league is not None:
         clauses.append("league = ?")
         params.append(league)

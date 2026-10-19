@@ -17,7 +17,7 @@ import sys
 from datetime import datetime
 
 from . import (clipboard, database, flagging, pitching, projection,
-               projections, reports, spreadsheet, tables, views)
+               projections, reports, service, spreadsheet, tables, views)
 
 BATTER_URL = "https://ootpcalculator.com/batter-projections"
 PITCHER_URL = "https://ootpcalculator.com/pitcher-projections"
@@ -196,6 +196,13 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--team", default=None,
                         help="restrict to one organisation (partial names "
                              "match, so 'louisville' is enough)")
+    report.add_argument("--seen", default=None, metavar="WINDOW",
+                        choices=list(service.SEEN_WINDOWS),
+                        help="how recently a player must have been seen to "
+                             "count as still being there. Without it, someone "
+                             "traded away keeps showing up on the team he was "
+                             "last seen on. One of: "
+                             + ", ".join(repr(w) for w in service.SEEN_WINDOWS))
     report.add_argument("--limit", type=int, default=25)
     report.add_argument("--overrated", type=int, default=10, metavar="N")
     report.add_argument("--min-z", type=float, default=None)
@@ -823,9 +830,16 @@ def command_report(args: argparse.Namespace) -> int:
                       + ", ".join(f"{n} {m}" for m, n in sorted(counts.items()))
                       + f". Using {mode} - pass --mode to choose.",
                       file=sys.stderr)
+        since = service.seen_cutoff(connection, league,
+                                     getattr(args, "seen", None))
         rows = database.latest(connection, mode=mode, role=args.role,
                                team=args.team, league=league,
-                               tag=args.tag if args.fit_on_tag else None)
+                               tag=args.tag if args.fit_on_tag else None,
+                               seen_since=since)
+        if since:
+            print(f"NOTE: only players seen on or after {since} - someone "
+                  "traded away is not on your roster any more.",
+                  file=sys.stderr)
         # A grade floor should not discard a prospect who is unusable today
         # and excellent later, so the other mode's grade is fetched and the
         # better of the two decides. "Below 38 now and below 38 ever" is a

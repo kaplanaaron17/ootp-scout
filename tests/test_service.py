@@ -13,6 +13,8 @@ from ootp_scout import service
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 BATTERS = os.path.join(FIXTURES, "pool_batters.tsv")
 PITCHERS = os.path.join(FIXTURES, "groundfly_pitchers.tsv")
+ORGS = os.path.join(FIXTURES, "pool_batters_orgs.tsv")
+OVER_100 = os.path.join(FIXTURES, "scale_1_100_over.tsv")
 
 
 class ServiceTest(unittest.TestCase):
@@ -137,6 +139,142 @@ class RankTest(ServiceTest):
         with self.assertRaises(service.ScoutError) as caught:
             service.rank(db=self.db, min_grade=99)
         self.assertIn("left to fit", str(caught.exception))
+
+
+class TeamTest(ServiceTest):
+    def test_the_clubs_held_come_back_with_counts(self):
+        self._import(ORGS)
+        held = dict(service.teams("Demo", self.db))
+        self.assertEqual(sum(held.values()), 41)
+        self.assertIn("Louisville Bats", held)
+
+    def test_one_club_can_be_singled_out(self):
+        self._import(ORGS)
+        only = service.rank(db=self.db, team="Louisville Bats")
+        clubs = {f.subject.meta["team"] for f in only.findings}
+        self.assertEqual(clubs, {"Louisville Bats"})
+        self.assertLess(only.shown, 41)
+
+    def test_a_partial_club_name_is_enough(self):
+        self._import(ORGS)
+        self.assertTrue(service.rank(db=self.db, team="louisville").findings)
+
+    def test_the_fit_still_spans_the_league(self):
+        """Ranking a club against its own 14 players answers nothing.
+
+        The question is whether a player is underrated against the league, so
+        the club narrows who is listed and not who he is measured against.
+        """
+        self._import(ORGS)
+        only = service.rank(db=self.db, team="Louisville Bats")
+        self.assertEqual(only.fitted_on, 41)
+        self.assertLess(only.shown, 41)
+        self.assertIn("measured against all 41", " ".join(only.notes))
+
+    def test_fitting_inside_the_club_is_available_if_asked_for(self):
+        self._import(ORGS)
+        inside = service.rank(db=self.db, team="Louisville Bats",
+                              fit_on_team=True)
+        self.assertEqual(inside.fitted_on, inside.shown)
+        self.assertLess(inside.fitted_on, 41)
+
+    def test_a_club_nobody_is_on_complains(self):
+        self._import(ORGS)
+        with self.assertRaises(service.ScoutError) as caught:
+            service.rank(db=self.db, team="Akron Aeros")
+        self.assertIn("Akron Aeros", str(caught.exception))
+
+    def test_a_player_keeps_his_league_wide_rank(self):
+        """His position in the ranking is a league fact, not a club one."""
+        self._import(ORGS)
+        league = [f.subject.name for f in service.rank(db=self.db).findings]
+        club = service.rank(db=self.db, team="Louisville Bats").findings
+        order = [league.index(f.subject.name) for f in club]
+        self.assertEqual(order, sorted(order))
+
+
+class SeenTest(ServiceTest):
+    """A player who has left must stop showing up as being on the roster.
+
+    His last observation is still his latest one, so without a recency cutoff
+    a traded player sits on your team forever.
+    """
+
+    def _two_dates(self, keep=10):
+        """Import everyone, backdate them, then import a shortened roster."""
+        import datetime as dt
+
+        from ootp_scout import database
+
+        self._import()
+        connection = database.connect(self.db)
+        old = (dt.date.today() - dt.timedelta(days=200)).isoformat()
+        connection.execute("UPDATE observations SET seen_at = ?",
+                           (old + "T12:00:00",))
+        connection.commit()
+        connection.close()
+
+        lines = open(BATTERS, encoding="utf-8").read().splitlines()
+        short = os.path.join(self.folder.name, "after.tsv")
+        with open(short, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines[:keep + 1]) + "\n")
+        self._import(short)
+        return old
+
+    def test_without_a_cutoff_everyone_is_still_listed(self):
+        self._two_dates()
+        self.assertEqual(service.rank(db=self.db).shown, 41)
+
+    def test_but_it_says_the_stale_ones_may_have_left(self):
+        self._two_dates()
+        notes = " ".join(service.rank(db=self.db).notes)
+        self.assertIn("may have left", notes)
+
+    def test_the_newest_import_shows_only_who_is_still_there(self):
+        self._two_dates(keep=10)
+        result = service.rank(db=self.db, seen="newest import")
+        self.assertEqual(result.shown, 10)
+        self.assertIn("Hid 31", " ".join(result.notes))
+
+    def test_a_days_window_does_the_same(self):
+        self._two_dates(keep=10)
+        self.assertEqual(service.rank(db=self.db, seen="last 30 days").shown, 10)
+
+    def test_a_window_wide_enough_keeps_everyone(self):
+        self._two_dates(keep=10)
+        self.assertEqual(service.rank(db=self.db, seen="last year").shown, 41)
+
+    def test_an_unknown_window_is_ignored_rather_than_crashing(self):
+        self._two_dates()
+        self.assertEqual(service.rank(db=self.db, seen="whenever").shown, 41)
+
+    def test_the_date_each_player_was_seen_comes_through(self):
+        self._import()
+        result = service.rank(db=self.db)
+        seen = result.findings[0].subject.meta.get("seen")
+        self.assertRegex(seen, r"^\d{4}-\d{2}-\d{2}$")
+
+
+class RatingsPast100Test(ServiceTest):
+    """A 1-100 league that displays above 100 used to be refused outright."""
+
+    def test_it_imports(self):
+        result = self._import(OVER_100)
+        self.assertEqual(result.scale, "1 to 100")
+        self.assertEqual(result.players, 41)
+        self.assertEqual(result.skipped, [])
+
+    def test_and_ranks_with_the_planted_player_on_top(self):
+        self._import(OVER_100)
+        result = service.rank(db=self.db)
+        self.assertEqual(result.findings[0].subject.name, "Sleeper Sam")
+
+    def test_implied_grades_stay_on_the_1_100_scale(self):
+        self._import(OVER_100)
+        for finding in service.rank(db=self.db).findings:
+            if finding.implied_grade is not None:
+                self.assertGreaterEqual(finding.implied_grade, 1)
+                self.assertLessEqual(finding.implied_grade, 100)
 
 
 class HistoryTest(ServiceTest):

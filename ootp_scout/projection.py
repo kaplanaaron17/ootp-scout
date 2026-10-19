@@ -39,6 +39,19 @@ def convert_rating(scale: str, rating: float, stuff: bool = False) -> int:
     return round(converted)
 
 
+def scale_ceiling(scale: str, stuff: bool = False) -> float:
+    """The highest displayed rating this scale can actually carry.
+
+    OOTP shows ratings above a scale's nominal top - a 90 Stealing on 20-80,
+    and values past 100 on the 1-100 scale. The real limit is not the name of
+    the scale but convert_rating's: 250 on the internal scale, 350 for Stuff.
+    Inverting that gives 95 for 20-80 and 124.75 for 1-100, which is why both
+    are derived here rather than written down.
+    """
+    low, high = SCALE_BOUNDS[scale]
+    return low + (350 if stuff else 250) * (high - low) / 200
+
+
 def convert_250_to_600(value: float) -> float:
     """The 1-250 scale stretched onto the 1-600 one the lookups are built on."""
     points = [(0, 100), (100, 400), (200, 500), (250, 600)]

@@ -119,8 +119,20 @@ disambiguates it.
   scale, and the calculator must be told which. It is inferred from the data:
   20-80 rounds to grades, so every value lands on a multiple of five, while
   1-100 produces off-grid values immediately. Real exports then showed ratings
-  *above* the nominal 20-80 ceiling — a 90 Stealing — so the detector matches
-  the calculator's actual limit rather than the nominal one.
+  *above* the nominal ceiling of both scales — a 90 Stealing on 20-80, and
+  ratings past 100 in a 1-100 league. The limit is now derived from the
+  calculator's own (250 on its internal scale), giving 95 and 124.75, so
+  neither ceiling can drift from the arithmetic that produced it.
+- **Players who are no longer there.** Every import is kept, so a player's last
+  sighting stays his latest one — and someone traded away went on appearing on
+  the team he was last seen playing for, indefinitely. A recency filter fixes
+  it, but the default stays "show everything" and *says* how many rows predate
+  the newest import: silently hiding a player because an export was incomplete
+  would be the worse failure.
+- **Filtering to one club must not refit on it.** A team of 35 is too small to
+  fit a curve on, and "best on this roster" is not the question being asked. So
+  the club narrows what is listed while the fit still spans the league, and each
+  player keeps the rank he holds league-wide.
 - **Runs-allowed WAR for pitchers.** The calculator's WAR sits beside FIP, so
   it is fielding-independent. Its output also carries innings and runs, which
   is enough to compute the runs-allowed flavour alongside it. The replacement
@@ -141,7 +153,7 @@ disambiguates it.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-377 tests. Fixtures in `tests/fixtures/` are real exports paired with the
+405 tests. Fixtures in `tests/fixtures/` are real exports paired with the
 projections the calculator actually returned for them, including a planted
 player whose tools are elite and whose grade is 35 — he must come out first.
 
