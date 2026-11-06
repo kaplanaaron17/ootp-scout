@@ -33,21 +33,79 @@ a column — an ERA says nothing about a hitter.
 
 | Role | Columns |
 | --- | --- |
-| batter | PA, HR, AVG, OBP, SLG, OPS+ |
-| pitcher | GS, IP, ERA, FIP, WHIP, K/9, rWAR |
-| all | PA, IP, OPS+, ERA, rWAR — the few that read side by side |
+| batter | PA, HR, AVG, OBP, SLG, ISO, wOBA, wRC+, BB%, K% |
+| pitcher | GS, IP, ERA, FIP, WHIP, HR/9, K%, BB%, WAR/200, rWAR |
+| all | PA, IP, wRC+, ERA, WAR/200 — the few that read side by side |
+
+The table scrolls sideways; the player card (double-click) has the rest,
+including K/9, BB/9, K/BB, BABIP, ERA+ and the counting stats.
+
+### Is his WAR innings or effectiveness?
+
+WAR is exactly linear in innings in this model, so dividing it out separates
+the two. **WAR/200** is what he would be worth over 200 innings — the rate —
+and **IP** is how much of him there is.
+
+```
+                 IP     ERA      K%     BB%    HR/9     WAR   WAR/200
+workhorse SP  189.6    2.98    29.4     6.5    0.77    6.48      6.83
+short SP      157.5    2.98    29.4     6.5    0.77    5.18      6.57
+reliever       85.3    2.98    29.4     6.5    0.77    1.98      4.63
+```
+
+Three pitchers with identical rate stats and WAR from 6.48 to 1.98. All of
+that gap is workload. Sort by WAR to find who helps most this season; sort by
+WAR/200 to find who is actually best. (The reliever's lower WAR/200 is not an
+error: relief innings carry a higher replacement level, so the same rate is
+worth less.)
+
+**K% and BB% are per batter faced**, not per nine, because per nine confounds
+a pitcher's rate with how deep he goes into games. K/9 and BB/9 are still on
+the card.
 
 Every one of them sorts, and a cell that does not apply to a player's role is
 left blank rather than zeroed: an ERA of 0.00 for a left fielder would read as
 a projection. Sorting on a stat puts the blanks last in **both** directions,
 so reversing an ERA sort does not march every hitter to the top.
 
-**On wRC+:** it is not a separate column because in this model it is OPS+, to
-the decimal. The calculator derives a hitter's runs above average straight
-from OPS+ — `RUN_PA * (OPS+/100 - 1) * PA` — and `RUN_PA` is league runs per
-plate appearance, which is exactly the denominator in wRC+'s definition. The
-two collapse into each other. A second column under the other name would be
-the same number twice.
+Rows imported before a stat existed show it blank too, rather than guessing.
+wOBA needs hit-by-pitches and K%/BB% need batters faced; neither was stored
+until now, so both stay empty on older rows until you import that view again.
+
+### wOBA and wRC+
+
+wOBA weights each way of reaching base by the runs it actually produces,
+rather than by how it moves on-base and slugging. The linear weights are the
+one thing here taken from outside — deriving them needs a run-expectancy
+matrix that an OOTP export does not carry — but **the scale is derived**, from
+wOBA's own definition: it is whatever makes the league's wOBA equal its OBP,
+using the same league totals the projection model is built on.
+
+That derivation reproduces the published wOBA weights to within 2.2%, and
+uniformly, so the *shape* matches exactly and the offset is scale alone (the
+denominator here omits sacrifice flies, which an export does not carry).
+
+```
+                derived   published
+  walks           0.705       0.690
+  singles         0.889       0.870
+  doubles         1.244       1.217
+  home runs       1.982       1.940
+```
+
+**That 2.2% cancels out of wRC+ entirely**, because wRC+ divides by the same
+scale it multiplied by. Only the displayed wOBA carries it.
+
+An earlier version of this tool argued wRC+ was just OPS+ renamed. That was
+true of the *shortcut* — deriving runs from OPS+, which is what the projection
+model does internally for WAR. Computed properly from wOBA it is a different
+number: on a real pool the two run 5-10 points apart, because OPS+ treats a
+walk and a single by their effect on two rate stats while wRC+ treats them by
+their run value. The column is wRC+.
+
+One consequence worth knowing: WAR still comes from the model's OPS+-derived
+run estimate, so a player's wRC+ and his WAR are not computed from the same
+offensive number. They will usually agree and occasionally will not.
 
 **Team does not narrow the fit.** Picking your club lists your 35 players but
 still measures them against all 596 in the league, and keeps the rank each one

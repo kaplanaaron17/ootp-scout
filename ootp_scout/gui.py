@@ -51,30 +51,37 @@ COLUMNS = [
 # exactly. A second column under the other name would be the same number
 # twice.
 BATTING_STATS = [
-    ("plate_appearances", "PA", 55, 0),
+    ("plate_appearances", "PA", 50, 0),
     ("home_runs", "HR", 45, 0),
-    ("avg", "AVG", 55, 3),
-    ("obp", "OBP", 55, 3),
-    ("slg", "SLG", 55, 3),
-    ("ops_plus", "OPS+", 55, 0),
+    ("avg", "AVG", 52, 3),
+    ("obp", "OBP", 52, 3),
+    ("slg", "SLG", 52, 3),
+    ("iso", "ISO", 52, 3),
+    ("woba", "wOBA", 55, 3),
+    ("wrc_plus", "wRC+", 52, 0),
+    ("bb_rate", "BB%", 52, 1),
+    ("k_rate", "K%", 52, 1),
 ]
 PITCHING_STATS = [
-    ("starts", "GS", 45, 0),
-    ("innings", "IP", 55, 1),
-    ("era", "ERA", 55, 2),
-    ("fip", "FIP", 55, 2),
-    ("whip", "WHIP", 55, 2),
-    ("k_9", "K/9", 50, 1),
+    ("starts", "GS", 42, 0),
+    ("innings", "IP", 52, 1),
+    ("era", "ERA", 50, 2),
+    ("fip", "FIP", 50, 2),
+    ("whip", "WHIP", 52, 2),
+    ("hr_9", "HR/9", 52, 1),
+    ("k_rate", "K%", 52, 1),
+    ("bb_rate", "BB%", 52, 1),
+    ("war_200", "WAR/200", 62, 1),
 ]
 # What a mixed pool shows: the few that read sensibly side by side, with the
 # cells that do not apply left blank rather than zeroed.
 MIXED_STATS = [
-    ("plate_appearances", "PA", 55, 0),
-    ("innings", "IP", 55, 1),
-    ("ops_plus", "OPS+", 55, 0),
-    ("era", "ERA", 55, 2),
+    ("plate_appearances", "PA", 50, 0),
+    ("innings", "IP", 52, 1),
+    ("wrc_plus", "wRC+", 52, 0),
+    ("era", "ERA", 50, 2),
+    ("war_200", "WAR/200", 62, 1),
 ]
-# rWAR exists only for pitchers, so it rides with their block.
 RWAR_COLUMN = ("rwar", "rWAR", 55, 2)
 
 # Row tints, matching the spreadsheet so the two read alike.
@@ -221,9 +228,17 @@ class ScoutWindow(tk.Tk):
 
         vertical = ttk.Scrollbar(frame, orient="vertical",
                                  command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vertical.set)
-        self.tree.pack(side="left", fill="both", expand=True)
-        vertical.pack(side="right", fill="y")
+        horizontal = ttk.Scrollbar(frame, orient="horizontal",
+                                   command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vertical.set,
+                            xscrollcommand=horizontal.set)
+        # grid, not pack: the horizontal bar has to sit under the table and
+        # beside nothing, which pack cannot express without a second frame.
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal.grid(row=1, column=0, sticky="ew")
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
 
     def _apply_columns(self, stats):
         """Point the table at the analysis columns plus this stat block."""
@@ -416,6 +431,9 @@ class ScoutWindow(tk.Tk):
             self._results = []
             self._result = None
             self.tree.delete(*self.tree.get_children())
+            # And move the headings to the role that was asked for, so an
+            # empty table is not captioned with the previous one's stats.
+            self._apply_columns(self._stat_block([]))
 
         self._run(work, done, "Fitting…", on_error=failed)
 

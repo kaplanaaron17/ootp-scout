@@ -297,7 +297,8 @@ class WindowTest(unittest.TestCase):
         self.window.refresh_ranking()
         self.settle()
         headings = self.headings()
-        for wanted in ("PA", "HR", "AVG", "OBP", "SLG", "OPS+"):
+        for wanted in ("PA", "HR", "AVG", "OBP", "SLG", "ISO", "wOBA",
+                       "wRC+", "BB%", "K%"):
             self.assertIn(wanted, headings)
         self.assertNotIn("ERA", headings)
 
@@ -308,7 +309,8 @@ class WindowTest(unittest.TestCase):
         self.window.refresh_ranking()
         self.settle()
         headings = self.headings()
-        for wanted in ("GS", "IP", "ERA", "FIP", "WHIP", "K/9", "rWAR"):
+        for wanted in ("GS", "IP", "ERA", "FIP", "WHIP", "HR/9", "K%",
+                       "BB%", "WAR/200", "rWAR"):
             self.assertIn(wanted, headings)
         self.assertNotIn("OBP", headings)
 
@@ -321,7 +323,7 @@ class WindowTest(unittest.TestCase):
         self.window.refresh_ranking()
         self.settle()
         headings = self.headings()
-        for wanted in ("PA", "IP", "OPS+", "ERA"):
+        for wanted in ("PA", "IP", "wRC+", "ERA", "WAR/200"):
             self.assertIn(wanted, headings)
 
     def test_the_values_land_under_their_headings(self):

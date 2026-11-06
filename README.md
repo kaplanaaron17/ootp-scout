@@ -131,11 +131,16 @@ disambiguates it.
   it, but the default stays "show everything" and *says* how many rows predate
   the newest import: silently hiding a player because an export was incomplete
   would be the worse failure.
-- **wRC+ would have been a second copy of OPS+.** Asked for it as a column, and
-  the algebra says no: the calculator derives a hitter's runs above average
-  straight from OPS+, scaled by league runs per plate appearance — which is
-  exactly wRC+'s denominator, so the definitions collapse into each other.
-  Shipping both would be the same number under two headings.
+- **wOBA's scale is derived, not copied.** wOBA is defined to sit on the same
+  scale as on-base percentage, so the scale is whatever makes the league's
+  wOBA equal its OBP — computed from the same league totals the projection
+  model uses. That reproduces the published wOBA weights to within 2.2%, and
+  *uniformly*, so the shape is exact and the offset is scale alone. It then
+  cancels out of wRC+, which divides by the same factor it multiplied by.
+- **Whether a pitcher's WAR is innings or effectiveness.** WAR is exactly
+  linear in innings here, so dividing it out answers the question: three arms
+  with identical ERA, K% and BB% came out at 6.48, 5.18 and 1.98 WAR purely on
+  workload, and at 6.83, 6.57 and 4.63 per 200 innings.
 - **A failed refresh has to clear the table.** Filtering to a role the newest
   import did not cover raised the right complaint and then left the previous
   pool on screen, so the table showed pitchers beside a Role reading "batter".
@@ -172,7 +177,7 @@ disambiguates it.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-507 tests. Fixtures in `tests/fixtures/` are real exports paired with the
+519 tests. Fixtures in `tests/fixtures/` are real exports paired with the
 projections the calculator actually returned for them, including a planted
 player whose tools are elite and whose grade is 35 — he must come out first.
 

@@ -208,6 +208,7 @@ class BatterLine:
     triples: float = 0.0
     home_runs: float = 0.0
     walks: float = 0.0
+    hit_by_pitches: float = 0.0
     strikeouts: float = 0.0
     stolen_bases: float = 0.0
     caught_stealing: float = 0.0
@@ -300,7 +301,8 @@ def project_batter(*, contact: float, gap: float, power: float, eye: float,
     return BatterLine(
         games=games, plate_appearances=projected_pa, at_bats=at_bats,
         hits=hits * scale, doubles=doubles * scale, triples=triples * scale,
-        home_runs=hr * scale, walks=bb * scale, strikeouts=so * scale,
+        home_runs=hr * scale, walks=bb * scale,
+        hit_by_pitches=HBP_PER_550 * scale, strikeouts=so * scale,
         stolen_bases=stolen * scale, caught_stealing=caught * scale,
         avg=avg, obp=obp, slg=slg, ops=obp + slg, ops_plus=ops_plus,
         babip=babip, war=war * scale)
@@ -318,7 +320,9 @@ class PitcherLine:
     runs: float = 0.0
     earned_runs: float = 0.0
     walks: float = 0.0
+    hit_by_pitches: float = 0.0
     strikeouts: float = 0.0
+    batters_faced: float = 0.0
     era: float = 0.0
     whip: float = 0.0
     fip: float = 0.0
@@ -378,7 +382,9 @@ def project_pitcher(*, stuff: float, movement: float, control: float,
     line = PitcherLine(
         games=games, starts=60 - games, innings=innings * scale,
         hits=hits * scale, home_runs=hr * scale, runs=runs * scale,
-        earned_runs=earned * scale, walks=bb * scale, strikeouts=so * scale,
+        earned_runs=earned * scale, walks=bb * scale,
+        hit_by_pitches=HBP_PER_550 * scale, strikeouts=so * scale,
+        batters_faced=(550 + bb + HBP_PER_550) * scale,
         era=era, whip=(bb + hits) / innings, fip=fip,
         era_plus=LG_ERA / (era / park.era) * 100, babip=babip)
 
