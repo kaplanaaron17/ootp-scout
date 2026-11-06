@@ -131,6 +131,14 @@ disambiguates it.
   it, but the default stays "show everything" and *says* how many rows predate
   the newest import: silently hiding a player because an export was incomplete
   would be the worse failure.
+- **wRC+ would have been a second copy of OPS+.** Asked for it as a column, and
+  the algebra says no: the calculator derives a hitter's runs above average
+  straight from OPS+, scaled by league runs per plate appearance — which is
+  exactly wRC+'s denominator, so the definitions collapse into each other.
+  Shipping both would be the same number under two headings.
+- **A failed refresh has to clear the table.** Filtering to a role the newest
+  import did not cover raised the right complaint and then left the previous
+  pool on screen, so the table showed pitchers beside a Role reading "batter".
 - **Team WAR is not a sum.** Every player is projected as a full-season major
   leaguer, so adding up an organisation's 120 players - most of them in the
   minors, each charged for a full season of major-league playing time - gives
@@ -164,7 +172,7 @@ disambiguates it.
 python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-493 tests. Fixtures in `tests/fixtures/` are real exports paired with the
+507 tests. Fixtures in `tests/fixtures/` are real exports paired with the
 projections the calculator actually returned for them, including a planted
 player whose tools are elite and whose grade is 35 — he must come out first.
 

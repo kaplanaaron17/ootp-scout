@@ -132,6 +132,12 @@ def build_parser() -> argparse.ArgumentParser:
     flag.add_argument("--league", default=None,
                       help="which league this pool belongs to. Taken from the "
                            "save the report came out of when not given.")
+    flag.add_argument("--replace", action="store_true",
+                      help="delete this league's earlier imports of the same "
+                           "ratings view once this one is recorded. Players "
+                           "who have left stop appearing - but their history "
+                           "goes with them. --seen on `report` hides them "
+                           "without deleting anything.")
     flag.add_argument("--tag", default=None,
                       help="label this batch, for example a draft year. "
                            "Reports can then show just these players while "
@@ -530,13 +536,24 @@ def _rank_and_record(args, report, view, subjects, rows, problems,
                          if subject.meta.get("age", "").isdigit() else None),
                     grade=subject.grade, war=subject.war, rwar=subject.rwar,
                     scouting_accuracy=subject.meta.get("scouting_accuracy", ""),
-                    ratings=subject.ratings)
+                    ratings=subject.ratings,
+                    projected=subject.projected or None)
                 for subject in subjects]
             added, refreshed = database.record(connection, observations,
                                                source=os.path.basename(report))
+            removed = 0
+            if getattr(args, "replace", False):
+                # Only once the new rows are in: deleting first would leave
+                # nothing behind at all if the import then failed.
+                today = database.newest_day(connection, league) or ""
+                removed = database.forget_before(connection, league, view.mode,
+                                                 view.role, today)
             connection.close()
             print(f"\nDatabase: {added} new, {refreshed} updated in league "
                   f"{league!r} ({args.db or database.default_path()})")
+            if removed:
+                print(f"Replaced: {removed} earlier observation(s) of "
+                      f"{view.ootp_view_name} in {league!r} deleted.")
         except sqlite3.Error as error:
             print(f"(could not write to the database: {error})", file=sys.stderr)
 
@@ -1255,7 +1272,9 @@ def _flag_locally(args, report, view, rows, problems) -> int:
             name=row.name, position=row.position, grade=row.grade,
             war=found.war, is_pitcher=row.is_pitcher, meta=row.meta,
             rwar=rwar.get(row.name.strip().lower()),
-            ratings={c: row.values.get(c, "") for c in view.rating_columns}))
+            ratings={c: row.values.get(c, "") for c in view.rating_columns},
+            projected=(statline.fields(found.line, view.role == views.PITCHER)
+                       if found.line is not None else {})))
 
     header = (f"View: {view.ootp_view_name}   "
               f"Grade column: {view.grade_column}   "

@@ -22,6 +22,7 @@ from . import reports, service, spreadsheet, statline
 
 TITLE = "OOTP Scout"
 
+# The analysis, which every row carries whatever the player does.
 COLUMNS = [
     ("rank", "#", 45),
     ("name", "Player", 165),
@@ -38,6 +39,43 @@ COLUMNS = [
     ("scouting", "Scouting", 90),
     ("seen", "Seen", 85),
 ]
+
+# Projected stats, as (stat key, heading, width, decimals). Which block is
+# shown follows the Role filter, because the two roles share almost no stats
+# worth a column: ERA says nothing about a hitter and OPS+ nothing about an
+# arm, and carrying both sets at once means half of every row is empty.
+#
+# OPS+ is the model's own wRC+. The calculator derives a hitter's runs above
+# average straight from OPS+ (RUN_PA * (OPS+/100 - 1) * PA), and RUN_PA is
+# league runs per plate appearance, so wRC+'s definition collapses to OPS+
+# exactly. A second column under the other name would be the same number
+# twice.
+BATTING_STATS = [
+    ("plate_appearances", "PA", 55, 0),
+    ("home_runs", "HR", 45, 0),
+    ("avg", "AVG", 55, 3),
+    ("obp", "OBP", 55, 3),
+    ("slg", "SLG", 55, 3),
+    ("ops_plus", "OPS+", 55, 0),
+]
+PITCHING_STATS = [
+    ("starts", "GS", 45, 0),
+    ("innings", "IP", 55, 1),
+    ("era", "ERA", 55, 2),
+    ("fip", "FIP", 55, 2),
+    ("whip", "WHIP", 55, 2),
+    ("k_9", "K/9", 50, 1),
+]
+# What a mixed pool shows: the few that read sensibly side by side, with the
+# cells that do not apply left blank rather than zeroed.
+MIXED_STATS = [
+    ("plate_appearances", "PA", 55, 0),
+    ("innings", "IP", 55, 1),
+    ("ops_plus", "OPS+", 55, 0),
+    ("era", "ERA", 55, 2),
+]
+# rWAR exists only for pitchers, so it rides with their block.
+RWAR_COLUMN = ("rwar", "rWAR", 55, 2)
 
 # Row tints, matching the spreadsheet so the two read alike.
 TAGS = {
@@ -98,6 +136,10 @@ class ScoutWindow(tk.Tk):
         ttk.Label(bar, text="Tag").pack(side="left", padx=(16, 4))
         self.tag_entry = ttk.Entry(bar, width=16)
         self.tag_entry.pack(side="left")
+
+        self.replace = tk.BooleanVar(value=False)
+        ttk.Checkbutton(bar, text="Replace older", variable=self.replace).pack(
+            side="left", padx=(12, 0))
 
         ttk.Button(bar, text="Export to spreadsheet…",
                    command=self.export_spreadsheet).pack(side="right")
@@ -168,14 +210,9 @@ class ScoutWindow(tk.Tk):
         frame = ttk.Frame(self, padding=(10, 0))
         frame.pack(fill="both", expand=True)
 
-        self.tree = ttk.Treeview(frame, columns=[c[0] for c in COLUMNS],
-                                 show="headings", selectmode="browse")
-        for key, heading, width in COLUMNS:
-            self.tree.heading(key, text=heading,
-                              command=lambda k=key: self.sort_by(k))
-            self.tree.column(key, width=width,
-                             anchor="w" if key in ("name", "team", "scouting")
-                             else "center")
+        self.tree = ttk.Treeview(frame, show="headings", selectmode="browse")
+        self._stats: list = []
+        self._apply_columns(MIXED_STATS + [RWAR_COLUMN])
         for name, colour in TAGS.items():
             self.tree.tag_configure(name, background=colour)
 
@@ -188,6 +225,39 @@ class ScoutWindow(tk.Tk):
         self.tree.pack(side="left", fill="both", expand=True)
         vertical.pack(side="right", fill="y")
 
+    def _apply_columns(self, stats):
+        """Point the table at the analysis columns plus this stat block."""
+        if stats == self._stats:
+            return
+        self._stats = list(stats)
+        keys = [c[0] for c in COLUMNS] + [s[0] for s in stats]
+        self.tree.configure(columns=keys)
+        for key, heading, width in COLUMNS:
+            self.tree.heading(key, text=heading,
+                              command=lambda k=key: self.sort_by(k))
+            self.tree.column(key, width=width, stretch=False,
+                             anchor="w" if key in ("name", "team", "scouting")
+                             else "center")
+        for key, heading, width, _decimals in stats:
+            self.tree.heading(key, text=heading,
+                              command=lambda k=key: self.sort_by(k))
+            self.tree.column(key, width=width, stretch=False, anchor="center")
+
+    def _stat_block(self, findings) -> list:
+        """Which stats to show, given what the pool actually holds."""
+        role = self.role.get()
+        if role == "pitcher":
+            return PITCHING_STATS + [RWAR_COLUMN]
+        if role == "batter":
+            return BATTING_STATS
+        arms = any(f.subject.is_pitcher for f in findings)
+        bats = any(not f.subject.is_pitcher for f in findings)
+        if arms and not bats:
+            return PITCHING_STATS + [RWAR_COLUMN]
+        if bats and not arms:
+            return BATTING_STATS
+        return MIXED_STATS + [RWAR_COLUMN]
+
     def _build_status(self):
         self.status = tk.StringVar(value="Import an export to begin.")
         bar = ttk.Frame(self, padding=(10, 6))
@@ -196,11 +266,12 @@ class ScoutWindow(tk.Tk):
 
     # --- background work ----------------------------------------------------
 
-    def _run(self, work, done, busy="Working…"):
+    def _run(self, work, done, busy="Working…", on_error=None):
         """Run `work` off the UI thread; call `done(result)` back on it.
 
         A league-sized fit takes long enough to freeze the window, and a frozen
-        window reads as a crash.
+        window reads as a crash. `on_error` runs instead of `done` when the
+        work raises, for callers that must undo something on screen.
         """
         if not self._alive:
             return
@@ -210,9 +281,9 @@ class ScoutWindow(tk.Tk):
 
         def worker():
             try:
-                self._work.put((done, work(), None))
+                self._work.put((done, work(), None, on_error))
             except Exception as error:                       # noqa: BLE001
-                self._work.put((done, None, error))
+                self._work.put((done, None, error, on_error))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -221,11 +292,13 @@ class ScoutWindow(tk.Tk):
             return
         try:
             while True:
-                done, result, error = self._work.get_nowait()
+                done, result, error, on_error = self._work.get_nowait()
                 self._busy -= 1
                 self.config(cursor="")
                 if error is not None:
                     self._complain(error)
+                    if on_error is not None:
+                        on_error(error)
                 else:
                     done(result)
         except queue.Empty:
@@ -292,16 +365,31 @@ class ScoutWindow(tk.Tk):
 
     def _import(self, path):
         tag = self.tag_entry.get().strip()
+        replace = self.replace.get()
+        if replace and not messagebox.askyesno(
+                TITLE,
+                "Replace older will delete this league's earlier imports of "
+                "the same ratings view once the new one is in.\n\n"
+                "Players who have left stop appearing, but their history goes "
+                "too - so a player's grade and WAR over time are lost for "
+                "everyone in that view.\n\n"
+                "The Seen filter hides departed players without deleting "
+                "anything, if that is all you are after.\n\n"
+                "Delete the earlier imports?"):
+            return
 
         def work():
-            return service.import_export(path, tag=tag, db=self.db)
+            return service.import_export(path, tag=tag, replace=replace,
+                                         db=self.db)
 
         def done(result):
             self.status.set(
                 f"{result.view_name}: {result.players} players on the "
                 f"{result.scale} scale - {result.added} new, "
                 f"{result.updated} updated in {result.league!r}"
-                + (f", tagged {result.tag!r}" if result.tag else ""))
+                + (f", tagged {result.tag!r}" if result.tag else "")
+                + (f", {result.removed} older removed" if result.removed
+                   else ""))
             if result.skipped:
                 messagebox.showinfo(
                     TITLE,
@@ -322,7 +410,14 @@ class ScoutWindow(tk.Tk):
             self._results = result.findings
             self._fill(result)
 
-        self._run(work, done, "Fitting…")
+        def failed(_error):
+            """Clear the table. Leaving the last pool on screen under a filter
+            that did not produce it invites reading pitchers as batters."""
+            self._results = []
+            self._result = None
+            self.tree.delete(*self.tree.get_children())
+
+        self._run(work, done, "Fitting…", on_error=failed)
 
     def _filters(self) -> dict:
         """What the filter row currently says, as service.rank wants it.
@@ -379,6 +474,7 @@ class ScoutWindow(tk.Tk):
         self.tree.delete(*self.tree.get_children())
         if result is None:
             return
+        self._apply_columns(self._stat_block(result.findings))
         wanted = self.find.get().strip().lower()
         for rank, finding in enumerate(result.findings, start=1):
             subject = finding.subject
@@ -396,7 +492,37 @@ class ScoutWindow(tk.Tk):
                         f"{subject.war:.2f}", f"{finding.expected_war:.2f}",
                         f"{finding.residual:+.2f}", f"{finding.z_score:.2f}",
                         finding.scouting_accuracy,
-                        subject.meta.get("seen", "")))
+                        subject.meta.get("seen", ""))
+                       + self._stat_values(finding))
+
+    def _stat_values(self, finding) -> tuple:
+        """This player's cells for the stat block on screen.
+
+        A cell that does not apply to his role is left blank. A zero would
+        read as a projection - an ERA of 0.00 for a left fielder.
+        """
+        subject = finding.subject
+        full = statline.derive(subject.projected, subject.is_pitcher)
+        out = []
+        for key, _heading, _width, decimals in self._stats:
+            if key == "rwar":
+                out.append("" if subject.rwar is None
+                           else f"{subject.rwar:.2f}")
+                continue
+            value = full.get(key)
+            out.append(statline.format_value(key, value, decimals)
+                       if value is not None else "")
+        return tuple(out)
+
+    @staticmethod
+    def _stat_key(column: str):
+        """One projected stat, or None when the player has no such thing."""
+        def value(finding):
+            if column == "rwar":
+                return finding.subject.rwar
+            return statline.derive(finding.subject.projected,
+                                   finding.subject.is_pitcher).get(column)
+        return value
 
     @staticmethod
     def _tint(z: float) -> str:
@@ -426,14 +552,26 @@ class ScoutWindow(tk.Tk):
                 "scouting": lambda f: f.scouting_accuracy,
                 "seen": lambda f: f.subject.meta.get("seen") or ""}
         key = numeric.get(column) or text.get(column)
+        is_stat = key is None and any(column == s[0] for s in self._stats)
+        if is_stat:
+            key = self._stat_key(column)
         if key is None:
             return
         self._sort_reverse = (not self._sort_reverse
                               if self._sort_column == column else
-                              column in numeric)
+                              column in numeric or is_stat)
         self._sort_column = column
-        self._results = sorted(self._results, key=key,
-                               reverse=self._sort_reverse)
+        if is_stat:
+            # Blanks go last in both directions. A pitcher has no OPS+, and
+            # reversing the sort should not march every hitter's absent ERA to
+            # the top as though the model ranked them there.
+            has = [f for f in self._results if key(f) is not None]
+            lacks = [f for f in self._results if key(f) is None]
+            self._results = sorted(has, key=key,
+                                   reverse=self._sort_reverse) + lacks
+        else:
+            self._results = sorted(self._results, key=key,
+                                   reverse=self._sort_reverse)
         self._result = service.RankingResult(
             league=self.league.get(), mode=self.mode.get(),
             grade_label="POT" if self.mode.get() == "potential" else "OVR",

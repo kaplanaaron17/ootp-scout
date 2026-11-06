@@ -354,6 +354,81 @@ class StandingsTest(ServiceTest):
         self.assertIn("never combined", str(caught.exception))
 
 
+class ReplaceTest(ServiceTest):
+    """Replacing drops what an import supersedes, and nothing else."""
+
+    def _backdate(self, days=90):
+        import datetime as dt
+
+        from ootp_scout import database
+
+        connection = database.connect(self.db)
+        old = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+        connection.execute("UPDATE observations SET seen_at = ?",
+                           (old + "T12:00:00",))
+        connection.commit()
+        connection.close()
+
+    def _count(self, **where):
+        from ootp_scout import database
+
+        connection = database.connect(self.db)
+        try:
+            clause = " AND ".join(f"{k} = ?" for k in where) or "1=1"
+            return connection.execute(
+                f"SELECT COUNT(*) FROM observations WHERE {clause}",
+                tuple(where.values())).fetchone()[0]
+        finally:
+            connection.close()
+
+    def test_without_it_everything_accumulates(self):
+        self._import()
+        self._backdate()
+        result = self._import()
+        self.assertEqual(result.removed, 0)
+        self.assertEqual(self._count(), 82)
+
+    def test_with_it_the_earlier_import_goes(self):
+        self._import()
+        self._backdate()
+        result = self._import(replace=True)
+        self.assertEqual(result.removed, 41)
+        self.assertEqual(self._count(), 41)
+
+    def test_it_leaves_the_other_role_alone(self):
+        """Refreshing the batters says nothing about the pitchers."""
+        self._import()
+        self._import(PITCHERS)
+        self._backdate()
+        self._import(replace=True)
+        self.assertEqual(self._count(role="pitcher"), 5)
+        self.assertEqual(self._count(role="batter"), 41)
+
+    def test_it_leaves_other_leagues_alone(self):
+        self._import(league="One")
+        self._import(league="Two")
+        self._backdate()
+        self._import(league="One", replace=True)
+        self.assertEqual(self._count(league="Two"), 41)
+
+    def test_todays_own_rows_survive_it(self):
+        """The import being recorded must not delete itself."""
+        result = self._import(replace=True)
+        self.assertEqual(result.removed, 0)
+        self.assertEqual(self._count(), 41)
+
+    def test_a_player_who_left_stops_appearing(self):
+        """The whole point: he is gone, not merely hidden."""
+        self._import()
+        self._backdate()
+        lines = open(BATTERS, encoding="utf-8").read().splitlines()
+        short = os.path.join(self.folder.name, "after.tsv")
+        with open(short, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines[:11]) + "\n")
+        self._import(short, replace=True)
+        self.assertEqual(service.rank(db=self.db, seen="any time").shown, 10)
+
+
 class HistoryTest(ServiceTest):
     def test_finds_a_player(self):
         self._import()

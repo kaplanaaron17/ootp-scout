@@ -96,6 +96,10 @@ class WindowTest(unittest.TestCase):
     def rows(self):
         return self.window.tree.get_children()
 
+    def headings(self):
+        return [self.window.tree.heading(c)["text"]
+                for c in self.window.tree["columns"]]
+
     def test_an_empty_database_says_so_rather_than_looking_broken(self):
         self.assertIn("Nothing stored", self.window.status.get())
         self.assertEqual(self.rows(), ())
@@ -200,7 +204,8 @@ class WindowTest(unittest.TestCase):
     def test_the_seen_date_is_shown(self):
         self.window._import(BATTERS)
         self.settle()
-        seen = self.window.tree.item(self.rows()[0])["values"][-1]
+        row = self.window.tree.item(self.rows()[0])["values"]
+        seen = row[self.headings().index("Seen")]
         self.assertRegex(str(seen), r"^\d{4}-\d{2}-\d{2}$")
 
     def test_the_seen_picker_offers_the_service_windows(self):
@@ -283,6 +288,112 @@ class WindowTest(unittest.TestCase):
         self.window.open_standings()
         self.settle()
         self.assertIn("ORG", self.said[0][1])
+
+    def test_the_stat_columns_follow_the_role(self):
+        self.window._import(BATTERS)
+
+        self.settle()
+        self.window.role.set("batter")
+        self.window.refresh_ranking()
+        self.settle()
+        headings = self.headings()
+        for wanted in ("PA", "HR", "AVG", "OBP", "SLG", "OPS+"):
+            self.assertIn(wanted, headings)
+        self.assertNotIn("ERA", headings)
+
+    def test_a_pitching_pool_shows_pitching_stats(self):
+        self.window._import(PITCHERS)
+        self.settle()
+        self.window.role.set("pitcher")
+        self.window.refresh_ranking()
+        self.settle()
+        headings = self.headings()
+        for wanted in ("GS", "IP", "ERA", "FIP", "WHIP", "K/9", "rWAR"):
+            self.assertIn(wanted, headings)
+        self.assertNotIn("OBP", headings)
+
+    def test_a_mixed_pool_shows_what_reads_side_by_side(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window._import(PITCHERS)
+        self.settle()
+        self.window.role.set("all")
+        self.window.refresh_ranking()
+        self.settle()
+        headings = self.headings()
+        for wanted in ("PA", "IP", "OPS+", "ERA"):
+            self.assertIn(wanted, headings)
+
+    def test_the_values_land_under_their_headings(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window.role.set("batter")
+        self.window.refresh_ranking()
+        self.settle()
+        headings = self.headings()
+        row = self.window.tree.item(self.rows()[0])["values"]
+        self.assertEqual(str(row[headings.index("PA")]), "600")
+        self.assertTrue(str(row[headings.index("AVG")]).startswith("."))
+
+    def test_a_cell_that_does_not_apply_is_blank_not_zero(self):
+        """An ERA of 0.00 for a left fielder would read as a projection."""
+        self.window._import(BATTERS)
+        self.settle()
+        self.window._import(PITCHERS)
+        self.settle()
+        self.window.role.set("all")
+        self.window.refresh_ranking()
+        self.settle()
+        headings = self.headings()
+        for item in self.rows():
+            row = self.window.tree.item(item)["values"]
+            era = str(row[headings.index("ERA")]).strip()
+            appearances = str(row[headings.index("PA")]).strip()
+            self.assertFalse(era and appearances,
+                             "a player cannot have both an ERA and a PA count")
+
+    def test_sorting_on_a_stat_puts_blanks_last(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window._import(PITCHERS)
+        self.settle()
+        self.window.role.set("all")
+        self.window.refresh_ranking()
+        self.settle()
+        self.window.sort_by("era")
+        headings = self.headings()
+        column = headings.index("ERA")
+        values = [str(self.window.tree.item(r)["values"][column]).strip()
+                  for r in self.rows()]
+        filled = [index for index, v in enumerate(values) if v]
+        blank = [index for index, v in enumerate(values) if not v]
+        self.assertTrue(filled and blank)
+        self.assertLess(max(filled), min(blank))
+
+    def test_a_failed_refresh_clears_the_table(self):
+        """Stale rows under a filter that did not produce them read as a lie.
+
+        Import pitchers only, ask for batters: the complaint is right, but the
+        pitchers must not stay on screen beside a Role of 'batter'.
+        """
+        self.window._import(PITCHERS)
+        self.settle()
+        self.assertTrue(self.rows())
+        self.window.role.set("batter")
+        self.said.clear()
+        self.window.refresh_ranking()
+        self.settle()
+        self.assertTrue(self.said)
+        self.assertEqual(self.rows(), ())
+
+    def test_and_the_complaint_names_the_role(self):
+        self.window._import(PITCHERS)
+        self.settle()
+        self.window.role.set("batter")
+        self.said.clear()
+        self.window.refresh_ranking()
+        self.settle()
+        self.assertIn("batters", self.said[0][1])
 
     def test_every_toolbar_button_survives_being_pressed(self):
         """The bug this file exists for broke on `config`, not on the work.

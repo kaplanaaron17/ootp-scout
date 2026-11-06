@@ -349,6 +349,24 @@ def forget(connection: sqlite3.Connection, league: str) -> int:
     return cursor.rowcount
 
 
+def forget_before(connection: sqlite3.Connection, league: str, mode: str,
+                  role: str, day: str) -> int:
+    """Drop this league's earlier observations of one mode and role.
+
+    Scoped deliberately narrowly. Replacing a batting import must not take the
+    pitchers with it, and replacing current ratings must not take potential -
+    they arrive as separate exports, so one of them being refreshed says
+    nothing about the others.
+    """
+    cursor = connection.execute(
+        """DELETE FROM observations
+           WHERE league = ? AND mode = ? AND role = ?
+             AND substr(seen_at, 1, 10) < ?""",
+        (league, mode, role, day))
+    connection.commit()
+    return cursor.rowcount
+
+
 def teams(connection: sqlite3.Connection,
           league: str | None = None) -> list[tuple[str, int]]:
     """Every team held, with how many players each has."""

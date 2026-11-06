@@ -25,6 +25,30 @@ and exporting a sheet.
 
 Double-click a row for that player's full projected season — see below.
 
+### Stats on the table itself
+
+The columns after the analysis are projected stats, and which ones appear
+follows the **Role** filter, because the two roles share almost nothing worth
+a column — an ERA says nothing about a hitter.
+
+| Role | Columns |
+| --- | --- |
+| batter | PA, HR, AVG, OBP, SLG, OPS+ |
+| pitcher | GS, IP, ERA, FIP, WHIP, K/9, rWAR |
+| all | PA, IP, OPS+, ERA, rWAR — the few that read side by side |
+
+Every one of them sorts, and a cell that does not apply to a player's role is
+left blank rather than zeroed: an ERA of 0.00 for a left fielder would read as
+a projection. Sorting on a stat puts the blanks last in **both** directions,
+so reversing an ERA sort does not march every hitter to the top.
+
+**On wRC+:** it is not a separate column because in this model it is OPS+, to
+the decimal. The calculator derives a hitter's runs above average straight
+from OPS+ — `RUN_PA * (OPS+/100 - 1) * PA` — and `RUN_PA` is league runs per
+plate appearance, which is exactly the denominator in wRC+'s definition. The
+two collapse into each other. A second column under the other name would be
+the same number twice.
+
 **Team does not narrow the fit.** Picking your club lists your 35 players but
 still measures them against all 596 in the league, and keeps the rank each one
 holds league-wide. Ranking a club against its own roster would answer a
@@ -441,6 +465,30 @@ report, then import it with the label typed in.
 
 `stats` lists the groups held, and the window's Group picker shows each with
 how many players it holds.
+
+
+## Replacing an import instead of adding to it
+
+Tick **Replace older** before importing, or pass `--replace`:
+
+```bash
+python -m ootp_scout flag latest --replace
+```
+
+The new rows go in first; only then are this league's **earlier imports of the
+same ratings view** deleted. That ordering matters — deleting first would
+leave nothing at all behind if the import then failed.
+
+The scope is deliberately narrow. Replacing a batting import does not touch
+the pitchers, and replacing current ratings does not touch potential: they
+arrive as separate exports, so one being refreshed says nothing about the
+others. Other leagues are never touched.
+
+**It deletes history.** Players who have left stop appearing, which is the
+point — but `lookup` can no longer show anyone's grade or WAR over time in
+that view, because the earlier observations are gone. If all you want is to
+stop seeing players you no longer have, the **Seen** filter does that without
+deleting anything. The window asks before it deletes.
 
 **The fit still uses the whole league.** That is the point, and it is not a
 detail: a draft class measured against itself only tells you who is the best of

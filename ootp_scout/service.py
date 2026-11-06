@@ -49,6 +49,8 @@ class ImportResult:
     added: int
     updated: int
     skipped: list[tuple[str, str]] = field(default_factory=list)
+    # Earlier observations dropped because this import replaced them.
+    removed: int = 0
 
 
 @dataclass
@@ -68,7 +70,8 @@ def _bounds(scale: str | None):
 
 
 def import_export(path: str, *, league: str | None = None, tag: str = "",
-                  mode: str | None = None, db: str | None = None
+                  mode: str | None = None, replace: bool = False,
+                  db: str | None = None
                   ) -> ImportResult:
     """Read an OOTP export, project every player, and record them."""
     if not os.path.exists(path):
@@ -117,15 +120,22 @@ def import_export(path: str, *, league: str | None = None, tag: str = "",
                        if found.line is not None else None)))
 
     connection = database.connect(db)
+    removed = 0
     try:
         added, updated = database.record(connection, observations,
                                          source=os.path.basename(path))
+        if replace:
+            # Only after the new rows are safely in. Deleting first would
+            # leave nothing at all behind if the import then failed.
+            today = database.newest_day(connection, resolved_league) or ""
+            removed = database.forget_before(
+                connection, resolved_league, view.mode, view.role, today)
     finally:
         connection.close()
 
     return ImportResult(league=resolved_league, tag=tag, scale=scale,
                         view_name=view.ootp_view_name, players=len(observations),
-                        added=added, updated=updated,
+                        added=added, updated=updated, removed=removed,
                         skipped=trouble + [(f"line {n}", d) for n, d in problems])
 
 
@@ -345,7 +355,13 @@ def rank(*, league: str | None = None, mode: str | None = None,
                 "grade floor.")
 
     if len(subjects) < MIN_PLAYERS:
-        raise ScoutError(f"Only {len(subjects)} player(s) left to fit against.")
+        what = f"{role}s" if role else "players"
+        where = f" seen since {since}" if since else ""
+        raise ScoutError(
+            f"Only {len(subjects)} {what} left to fit against{where}. "
+            + ("The newest import may not have covered that role - each "
+               "ratings view is exported separately." if role else
+               "Widen the filters, or import a larger pool."))
 
     analysis = flagging.analyze(
         subjects, degree=degree, split_by_role=not pool_roles,
