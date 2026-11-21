@@ -412,6 +412,114 @@ class WindowTest(unittest.TestCase):
         self.settle()
         self.assertEqual([k for k, _m in self.said if k == "error"], [])
 
+    # --- the Projections tabs and one-click import ---------------------------
+
+    def projection_rows(self, kind):
+        tree = self.window.projection_trees[kind]
+        return [tree.item(i)["values"] for i in tree.get_children()]
+
+    def projection_headings(self, kind):
+        tree = self.window.projection_trees[kind]
+        return [tree.heading(c)["text"] for c in tree["columns"]]
+
+    def test_an_import_lands_on_the_hitting_projections(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.assertEqual(len(self.projection_rows("hitters")), 41)
+        self.assertEqual(self.window.tabs.index("current"), 0)
+        self.assertIn("(41)", self.window.tabs.tab(0, "text"))
+
+    def test_a_pitching_import_lands_on_the_pitching_projections(self):
+        self.window._import(PITCHERS)
+        self.settle()
+        self.assertEqual(len(self.projection_rows("pitchers")), 5)
+        self.assertEqual(self.window.tabs.index("current"), 1)
+
+    def test_the_hitting_tab_carries_wrc_plus_war_and_fielding(self):
+        headings = self.projection_headings("hitters")
+        for wanted in ("wRC+", "Bat", "BsR", "Fld", "PosAdj", "Def", "WAR"):
+            self.assertIn(wanted, headings)
+
+    def test_the_pitching_tab_carries_era_starts_and_innings(self):
+        headings = self.projection_headings("pitchers")
+        for wanted in ("ERA", "GS", "IP", "FIP", "WAR"):
+            self.assertIn(wanted, headings)
+
+    def test_projections_are_filled_in_and_best_first(self):
+        self.window._import(BATTERS)
+        self.settle()
+        headings = self.projection_headings("hitters")
+        rows = self.projection_rows("hitters")
+        war = [float(r[headings.index("WAR")]) for r in rows]
+        self.assertEqual(war, sorted(war, reverse=True))
+        first = rows[0]
+        for column in ("wRC+", "Fld", "Def"):
+            self.assertNotEqual(str(first[headings.index(column)]).strip(), "")
+
+    def test_a_projection_column_sorts(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window.sort_projections("hitters", "wrc_plus")
+        column = self.projection_headings("hitters").index("wRC+")
+        values = [float(r[column]) for r in self.projection_rows("hitters")]
+        self.assertEqual(values, sorted(values, reverse=True))
+        self.window.sort_projections("hitters", "wrc_plus")
+        values = [float(r[column]) for r in self.projection_rows("hitters")]
+        self.assertEqual(values, sorted(values))
+
+    def test_find_narrows_the_projections_too(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window.find.insert(0, "sleeper")
+        self.window._redraw_all()
+        self.assertEqual(len(self.projection_rows("hitters")), 1)
+
+    def test_a_projection_row_opens_a_card(self):
+        self.window._import(BATTERS)
+        self.settle()
+        tree = self.window.projection_trees["hitters"]
+        tree.focus(tree.get_children()[0])
+        self.said.clear()
+        self.window.open_projection_card("hitters")
+        card = self.said[0][1]
+        self.assertIn("PROJECTED SEASON", card)
+        self.assertIn("Def", card)
+
+    def test_overwriting_is_on_and_asks_nothing(self):
+        """One click: no confirmation dialog stands between import and table."""
+        self.assertTrue(self.window.replace.get())
+        self.assertTrue(self.window.prune.get())
+        asked = []
+        real = messagebox.askyesno
+        messagebox.askyesno = lambda *a, **k: asked.append(a) or False
+        try:
+            self.window._import(BATTERS)
+            self.settle()
+        finally:
+            messagebox.askyesno = real
+        self.assertEqual(asked, [])
+        self.assertEqual(len(self.projection_rows("hitters")), 41)
+
+    def test_an_overwrite_drops_the_previous_list(self):
+        from ootp_scout import database
+
+        self.window._import(BATTERS)
+        self.settle()
+        connection = database.connect(self.window.db)
+        connection.execute("UPDATE observations SET seen_at = "
+                           "'2020-01-01T00:00:00+00:00'")
+        connection.commit()
+        connection.close()
+        with open(BATTERS, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+        short = os.path.join(self.folder.name, "short.tsv")
+        with open(short, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines[:8]) + "\n")
+        self.window._import(short)
+        self.settle()
+        self.assertEqual(len(self.projection_rows("hitters")), 7)
+        self.assertIn("older removed", self.window.last_import.get())
+
 
 @unittest.skipUnless(HAS_DISPLAY, "no display to open a window on")
 class SelfCheckTest(unittest.TestCase):

@@ -14,6 +14,7 @@ folders can sit in OneDrive, where a deep scan takes minutes.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from glob import glob
 
@@ -129,3 +130,65 @@ def find_latest(roots: list[str] | None = None) -> FoundReport:
             "Report -> Write report to disk, then try again. If your saves are "
             "somewhere unusual, pass the file path directly instead of --latest.")
     return reports[0]
+
+
+# What OOTP names a report it writes to disk: the moment it was written.
+_WRITTEN_REPORT = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.html?$",
+                             re.IGNORECASE)
+
+
+@dataclass
+class Pruned:
+    files: int = 0
+    bytes: int = 0
+
+
+def is_ootp_temp_folder(folder: str) -> bool:
+    """Whether a folder is the one OOTP drops written reports into.
+
+    .../saved_games/<save>/news/html/temp. Nothing outside that shape is ever
+    pruned: a report the user copied somewhere on purpose is theirs to keep.
+    """
+    parts = [p.lower() for p in
+             os.path.normpath(os.path.abspath(folder)).split(os.sep)]
+    return (len(parts) >= 5 and parts[-3:] == ["news", "html", "temp"]
+            and "saved_games" in parts[:-4])
+
+
+def prune_older(path: str) -> Pruned:
+    """Delete the reports OOTP wrote before this one, beside it.
+
+    Every Report -> Write report to disk leaves another timestamped HTML file
+    in the save's temp folder, and OOTP never removes them. Once one has been
+    imported, the older ones are dead weight. Only files named the way OOTP
+    names them, in the folder OOTP writes them to, and older than the report
+    just imported are touched - so a report written while this one was being
+    read survives.
+    """
+    pruned = Pruned()
+    folder = os.path.dirname(os.path.abspath(path))
+    if not is_ootp_temp_folder(folder):
+        return pruned
+    try:
+        keep = os.path.getmtime(path)
+        names = os.listdir(folder)
+    except OSError:
+        return pruned
+    here = os.path.normcase(os.path.abspath(path))
+    for name in names:
+        if not _WRITTEN_REPORT.match(name):
+            continue
+        candidate = os.path.join(folder, name)
+        if os.path.normcase(os.path.abspath(candidate)) == here:
+            continue
+        try:
+            if not os.path.isfile(candidate) or os.path.getmtime(candidate) >= keep:
+                continue
+            size = os.path.getsize(candidate)
+            os.remove(candidate)
+        except OSError:
+            # Open in the browser OOTP launched, most likely. Next time.
+            continue
+        pruned.files += 1
+        pruned.bytes += size
+    return pruned

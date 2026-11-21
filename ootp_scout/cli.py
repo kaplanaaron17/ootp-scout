@@ -545,9 +545,13 @@ def _rank_and_record(args, report, view, subjects, rows, problems,
             if getattr(args, "replace", False):
                 # Only once the new rows are in: deleting first would leave
                 # nothing behind at all if the import then failed.
-                today = database.newest_day(connection, league) or ""
-                removed = database.forget_before(connection, league, view.mode,
-                                                 view.role, today)
+                stamp = database.newest_stamp(connection, league, view.mode,
+                                              view.role) or ""
+                removed = database.forget_older_than(connection, league,
+                                                     view.mode, view.role,
+                                                     stamp)
+                if removed:
+                    database.compact(connection)
             connection.close()
             print(f"\nDatabase: {added} new, {refreshed} updated in league "
                   f"{league!r} ({args.db or database.default_path()})")
@@ -1340,6 +1344,13 @@ def command_forget(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        # Nothing asked for: open the window. Someone who double-clicks or
+        # types the bare command wants the application, not a usage error.
+        from . import gui
+        return gui.main()
     args = build_parser().parse_args(argv)
     if args.command == "prepare":
         return command_prepare(args)

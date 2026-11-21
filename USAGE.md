@@ -5,10 +5,47 @@ and why it is built the way it is.
 
 ## The window
 
-Double-click **`OOTP-Scout.exe`** and you get a window: import an export, and
-the whole pool comes back in a sortable table, tinted the same way the
-spreadsheet is. The toolbar covers importing, tagging, player history, trades
-and exporting a sheet.
+Double-click **`OOTP-Scout.exe`** (or **`OOTP-Scout.bat`** in a checkout, or
+run `python -m ootp_scout` with nothing after it) and the window opens.
+
+**Importing is one click.** In OOTP, switch a player list to a ratings view
+and use **Report → Write report to disk**, then press **Import newest OOTP
+report**. **Import a file…** picks one by hand instead. Two boxes beside the
+buttons are ticked by default:
+
+- **Overwrite previous import** - the new list replaces the last one of the
+  same league and ratings view (batting or pitching, current or potential),
+  and the database file is compacted so it does not grow. Untick it to keep a
+  history across imports instead.
+- **Delete old OOTP reports** - OOTP leaves a new timestamped HTML file in the
+  save's `news/html/temp` folder every time you write a report, and never
+  cleans them up. Once one is imported, the older ones there are deleted. Only
+  files OOTP named itself, in that folder, and older than the one imported.
+
+The window then opens on the projections:
+
+| Tab | Columns |
+| --- | --- |
+| **Hitting projections** | PA, AVG, OBP, SLG, HR, SB, wOBA, wRC+, Bat, BsR, Fld, PosAdj, Def, WAR |
+| **Pitching projections** | G, GS, IP, ERA, FIP, WHIP, K/9, BB/9, HR/9, K%, BB%, WAR, WAR/200 |
+| **Underrated** | The ranking against the scouting grade, described below |
+
+Every column sorts, best first by WAR to start with; double-click a player for
+his full projected season. The projections need no fit, so they work for a
+list of three as well as three hundred.
+
+**Fielding.** Bat, BsR, Fld and PosAdj are WAR's own terms, in runs over the
+season: hitting, baserunning, the glove, and the positional adjustment for
+where he plays. Def is Fld plus PosAdj, as FanGraphs writes it, and WAR is
+those four divided by ten plus a replacement allowance for playing time. Fld
+comes from the single **DEF** rating the ratings views carry, so it measures
+how good a defender he is, not how well he suits one position over another.
+A player exported without a DEF rating shows Fld and Def blank rather than
+zero, because the model then charges nothing for his glove at all.
+
+The **Underrated** tab is the original table: the whole pool, sortable and
+tinted the same way the spreadsheet is. The toolbar also covers tagging,
+player history, trades and exporting a sheet.
 
 ### The filters
 
@@ -191,8 +228,9 @@ That is the whole loop. It reads OOTP's HTML directly, works out the rating
 scale, projects every player, ranks them by residual and records the lot in the
 database. No browser, no clipboard, no download.
 
-Or double-click **`OOTP-Scout.bat`**, which walks through it and returns to a
-menu afterwards rather than closing:
+Or double-click **`OOTP-Scout-Menu.bat`**, which walks through it and returns
+to a menu afterwards rather than closing (**`OOTP-Scout.bat`** opens the
+window instead):
 
 ```
   ADD TO THE DATABASE
@@ -527,14 +565,17 @@ how many players it holds.
 
 ## Replacing an import instead of adding to it
 
-Tick **Replace older** before importing, or pass `--replace`:
+In the window this is **Overwrite previous import**, ticked by default. On the
+command line, pass `--replace`:
 
 ```bash
 python -m ootp_scout flag latest --replace
 ```
 
 The new rows go in first; only then are this league's **earlier imports of the
-same ratings view** deleted. That ordering matters — deleting first would
+same ratings view** deleted - everything older than the import just written,
+including an earlier list from the same day - and the database is compacted so
+the file actually shrinks. That ordering matters — deleting first would
 leave nothing at all behind if the import then failed.
 
 The scope is deliberately narrow. Replacing a batting import does not touch
@@ -546,7 +587,7 @@ others. Other leagues are never touched.
 point — but `lookup` can no longer show anyone's grade or WAR over time in
 that view, because the earlier observations are gone. If all you want is to
 stop seeing players you no longer have, the **Seen** filter does that without
-deleting anything. The window asks before it deletes.
+deleting anything. Untick the box in the window to keep history.
 
 **The fit still uses the whole league.** That is the point, and it is not a
 detail: a draft class measured against itself only tells you who is the best of

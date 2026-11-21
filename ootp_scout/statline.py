@@ -112,6 +112,7 @@ BATTER_FIELDS = (
     "games", "plate_appearances", "at_bats", "hits", "doubles", "triples",
     "home_runs", "walks", "hit_by_pitches", "strikeouts", "stolen_bases",
     "caught_stealing", "avg", "obp", "slg", "ops", "ops_plus", "babip", "war",
+    "batting_runs", "baserunning_runs", "fielding_runs", "position_runs",
 )
 PITCHER_FIELDS = (
     "games", "starts", "innings", "batters_faced", "hits", "home_runs",
@@ -145,6 +146,11 @@ BATTER_DISPLAY = (
     ("k_rate", "K%", 1),
     ("ops_plus", "OPS+", 0),
     ("wrc_plus", "wRC+", 0),
+    ("batting_runs", "Bat", 1),
+    ("baserunning_runs", "BsR", 1),
+    ("fielding_runs", "Fld", 1),
+    ("position_runs", "PosAdj", 1),
+    ("defense_runs", "Def", 1),
     ("war", "WAR", 1),
 )
 PITCHER_DISPLAY = (
@@ -234,6 +240,14 @@ def derive(stored: dict, is_pitcher: bool) -> dict[str, float]:
         out["iso"] = None if slug is None or avg is None else slug - avg
         out["woba"] = woba(stored)
         out["wrc_plus"] = wrc_plus(stored)
+        # Def, the way FanGraphs writes it: what the glove saves plus the
+        # positional adjustment for where he stands. Only when the glove was
+        # actually rated - a positional adjustment alone is not a defensive
+        # projection, it is a statement about the position.
+        fielding = stored.get("fielding_runs")
+        position = stored.get("position_runs")
+        out["defense_runs"] = (None if fielding is None or position is None
+                               else fielding + position)
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -244,6 +258,9 @@ def format_value(key: str, value: float | None, decimals: int) -> str:
     if decimals == 0:
         return f"{value:,.0f}"
     text = f"{value:.{decimals}f}"
+    if text.startswith("-") and not text.strip("-0."):
+        # -0.04 rounds to "-0.0", which reads as a sign that means something.
+        text = text[1:]
     if key in _DROP_LEADING_ZERO and text.startswith("0."):
         text = text[1:]
     if key in _PERCENTAGES:

@@ -367,6 +367,45 @@ def forget_before(connection: sqlite3.Connection, league: str, mode: str,
     return cursor.rowcount
 
 
+def forget_older_than(connection: sqlite3.Connection, league: str, mode: str,
+                      role: str, stamp: str) -> int:
+    """Drop this league's observations of one mode and role older than `stamp`.
+
+    What overwriting an import means. forget_before works by day, which keeps
+    anyone recorded earlier the same day - so a second list imported an hour
+    after the first would still carry the players the first one had and the
+    second did not. Every row an import writes carries that import's own
+    timestamp, so anything older is precisely what it did not contain.
+    """
+    cursor = connection.execute(
+        """DELETE FROM observations
+           WHERE league = ? AND mode = ? AND role = ? AND seen_at < ?""",
+        (league, mode, role, stamp))
+    connection.commit()
+    return cursor.rowcount
+
+
+def newest_stamp(connection: sqlite3.Connection, league: str, mode: str,
+                 role: str) -> str | None:
+    """When this league's newest import of one mode and role was written."""
+    row = connection.execute(
+        """SELECT MAX(seen_at) AS stamp FROM observations
+           WHERE league = ? AND mode = ? AND role = ?""",
+        (league, mode, role)).fetchone()
+    return row["stamp"] if row and row["stamp"] else None
+
+
+def compact(connection: sqlite3.Connection) -> None:
+    """Give deleted rows' space back to the disk.
+
+    SQLite keeps the pages a DELETE frees and reuses them later, so a file
+    never shrinks on its own. Overwriting imports is meant to keep the store
+    small; without this it would merely stop it growing.
+    """
+    connection.commit()
+    connection.execute("VACUUM")
+
+
 def teams(connection: sqlite3.Connection,
           league: str | None = None) -> list[tuple[str, int]]:
     """Every team held, with how many players each has."""

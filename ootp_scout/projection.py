@@ -219,6 +219,15 @@ class BatterLine:
     ops_plus: float = 0.0
     babip: float = 0.0
     war: float = 0.0
+    # WAR's own pieces, in runs over the projected season. They are not a
+    # second model: they are the four terms the WAR line below already adds
+    # up, kept instead of discarded. Fielding is None when the export carried
+    # no DEF rating, because the model then charges nothing for the glove and
+    # a 0.0 would read as "exactly average defender".
+    batting_runs: float = 0.0
+    baserunning_runs: float = 0.0
+    fielding_runs: float | None = None
+    position_runs: float = 0.0
 
 
 def project_batter(*, contact: float, gap: float, power: float, eye: float,
@@ -305,7 +314,10 @@ def project_batter(*, contact: float, gap: float, power: float, eye: float,
         hit_by_pitches=HBP_PER_550 * scale, strikeouts=so * scale,
         stolen_bases=stolen * scale, caught_stealing=caught * scale,
         avg=avg, obp=obp, slg=slg, ops=obp + slg, ops_plus=ops_plus,
-        babip=babip, war=war * scale)
+        babip=babip, war=war * scale,
+        batting_runs=bat * scale, baserunning_runs=bsr * scale,
+        fielding_runs=zr * scale if has_defense else None,
+        position_runs=POSITION_RUNS.get(position, 0) * scale)
 
 
 @dataclass

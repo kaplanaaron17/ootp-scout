@@ -51,6 +51,21 @@ class ImportResult:
     skipped: list[tuple[str, str]] = field(default_factory=list)
     # Earlier observations dropped because this import replaced them.
     removed: int = 0
+    # Older OOTP report files deleted from beside this one, and their size.
+    pruned_files: int = 0
+    pruned_bytes: int = 0
+    role: str = ""
+
+
+@dataclass
+class ProjectionTable:
+    """Everyone's projected season, split the way it is read."""
+
+    league: str
+    mode: str
+    hitters: list = field(default_factory=list)
+    pitchers: list = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -71,9 +86,15 @@ def _bounds(scale: str | None):
 
 def import_export(path: str, *, league: str | None = None, tag: str = "",
                   mode: str | None = None, replace: bool = False,
-                  db: str | None = None
+                  prune_reports: bool = False, db: str | None = None
                   ) -> ImportResult:
-    """Read an OOTP export, project every player, and record them."""
+    """Read an OOTP export, project every player, and record them.
+
+    `replace` overwrites: once the new rows are in, every earlier observation
+    of the same league, ratings view and role is deleted and the file is
+    compacted, so the store holds this list and nothing older.
+    `prune_reports` deletes the older report files OOTP left beside this one.
+    """
     if not os.path.exists(path):
         raise ScoutError(f"No such file: {path}")
     try:
@@ -127,15 +148,23 @@ def import_export(path: str, *, league: str | None = None, tag: str = "",
         if replace:
             # Only after the new rows are safely in. Deleting first would
             # leave nothing at all behind if the import then failed.
-            today = database.newest_day(connection, resolved_league) or ""
-            removed = database.forget_before(
-                connection, resolved_league, view.mode, view.role, today)
+            stamp = database.newest_stamp(connection, resolved_league,
+                                          view.mode, view.role) or ""
+            removed = database.forget_older_than(
+                connection, resolved_league, view.mode, view.role, stamp)
+            if removed:
+                database.compact(connection)
     finally:
         connection.close()
+
+    pruned = report_finder.prune_older(path) if prune_reports else None
 
     return ImportResult(league=resolved_league, tag=tag, scale=scale,
                         view_name=view.ootp_view_name, players=len(observations),
                         added=added, updated=updated, removed=removed,
+                        pruned_files=pruned.files if pruned else 0,
+                        pruned_bytes=pruned.bytes if pruned else 0,
+                        role=view.role,
                         skipped=trouble + [(f"line {n}", d) for n, d in problems])
 
 
@@ -247,6 +276,58 @@ def project_standings(*, league: str | None = None, games: int = 162,
     if since:
         table.notes.insert(0, f"Rosters as of {since}.")
     return table
+
+
+def _choose_league(connection, league: str | None) -> str:
+    held = database.leagues(connection)
+    if not held:
+        raise ScoutError("Nothing recorded yet - import an export first.")
+    if league is None:
+        if len(held) > 1:
+            names = ", ".join(repr(e["league"]) for e in held)
+            raise ScoutError(
+                "This database holds several leagues, which are never "
+                f"combined. Choose one: {names}")
+        league = held[0]["league"]
+    return league
+
+
+def projections(*, league: str | None = None, mode: str | None = None,
+                team: str | None = None, seen: str | None = None,
+                db: str | None = None) -> ProjectionTable:
+    """Every stored player's projected season, hitters and pitchers apart.
+
+    No fit and no baseline: this is the projection itself, so it works for a
+    pool of three as well as three hundred. Each list comes back best first by
+    WAR. Which list a player lands in follows the view he was imported from,
+    because that is what decided which model projected him.
+    """
+    connection = database.connect(db)
+    notes: list[str] = []
+    try:
+        league = _choose_league(connection, league)
+        if mode is None:
+            counts: dict[str, int] = {}
+            for row in database.latest(connection, league=league):
+                counts[row["mode"]] = counts.get(row["mode"], 0) + 1
+            mode = max(counts, key=counts.get) if counts else views.CURRENT
+        since = seen_cutoff(connection, league, seen)
+        rows = database.latest(connection, mode=mode, league=league,
+                               team=team, seen_since=since)
+    finally:
+        connection.close()
+
+    subjects = _subjects(rows)
+    missing = sum(1 for s in subjects if not s.projected)
+    if missing:
+        notes.append(f"{missing} player(s) were recorded by an older version "
+                     "without a projected season - import them again to "
+                     "see one.")
+    best = sorted(subjects, key=lambda s: s.war, reverse=True)
+    return ProjectionTable(
+        league=league, mode=mode,
+        hitters=[s for s in best if not s.is_pitcher],
+        pitchers=[s for s in best if s.is_pitcher], notes=notes)
 
 
 def rank(*, league: str | None = None, mode: str | None = None,
