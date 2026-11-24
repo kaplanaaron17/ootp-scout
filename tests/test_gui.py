@@ -459,6 +459,21 @@ class WindowTest(unittest.TestCase):
                 self.assertNotEqual(str(first[headings.index(column)]).strip(),
                                     "")
 
+    def test_fielding_at_every_position_reaches_the_tab_and_card(self):
+        from tests.test_fielding import SPREAD, with_positions
+        path = with_positions(self.folder.name, lambda p: SPREAD)
+        self.window._import(path)
+        self.settle()
+        headings = self.projection_headings("hitters")
+        first = self.projection_rows("hitters")[0]
+        self.assertEqual(first[headings.index("Best pos")], "SS")
+        self.assertNotEqual(str(first[headings.index("WAR there")]), "")
+        tree = self.window.projection_trees["hitters"]
+        tree.focus(tree.get_children()[0])
+        self.said.clear()
+        self.window.open_projection_card("hitters")
+        self.assertIn("BY POSITION", self.said[0][1])
+
     def test_projections_are_filled_in_and_best_first(self):
         self.window._import(BATTERS)
         self.settle()

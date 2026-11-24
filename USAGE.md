@@ -43,6 +43,24 @@ how good a defender he is, not how well he suits one position over another.
 A player exported without a DEF rating shows Fld and Def blank rather than
 zero, because the model then charges nothing for his glove at all.
 
+**Fielding at every position.** OOTP rates every player at every position
+(C, 1B, 2B, 3B, SS, LF, CF, RF) on the same scale as his other ratings. Give
+the tool those ratings and each one goes through the same zone-rating formula
+DEF does, with that position's adjustment, so the card shows Fld, Def and WAR
+at every position he can play, best first. The hitting tab adds **Best pos**
+and **WAR there**. Two ways to get them in:
+
+- **Fielding Ratings report.** Switch the same player list to OOTP's Fielding
+  Ratings view, write the report, and import it after the batting one. It
+  carries no hitting ratings, so it is matched to the hitters already stored
+  by name and only adds the positions. A later batting import keeps them.
+- **A custom batting view** with the eight position columns added. One report
+  then does both.
+
+A position rated blank or 0 means he cannot play there and is left out. Only
+the glove and the positional adjustment change between positions; the bat,
+legs and playing time are the same wherever he stands.
+
 **Splits.** The current-ratings views carry split ratings: CON and POW
 against left- and right-handed pitching for hitters, STU against left- and
 right-handed batters for pitchers. Each player is projected twice more, once

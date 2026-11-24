@@ -18,7 +18,7 @@ import tkinter as tk
 import traceback
 from tkinter import filedialog, messagebox, ttk
 
-from . import reports, service, spreadsheet, statline
+from . import fielding, reports, service, spreadsheet, statline
 
 TITLE = "OOTP Scout"
 
@@ -116,6 +116,8 @@ HITTER_PROJECTION = [
     ("wrc_plus_vl", "wRC+ vL", 68, 0),
     ("wrc_plus_vr", "wRC+ vR", 68, 0),
     ("war_split", "WAR splits", 80, 1),
+    ("best_position", "Best pos", 65, 0),
+    ("best_war", "WAR there", 72, 1),
 ]
 PITCHER_PROJECTION = [
     ("games", "G", 42, 0),
@@ -593,7 +595,7 @@ class ScoutWindow(tk.Tk):
         if column == current:
             reverse = not reverse
         else:
-            reverse = column not in ("name", "team", "position")
+            reverse = column not in ("name", "team", "position", "best_position")
         self._projection_sort[kind] = (column, reverse)
         self._sort_projected(kind)
         self._redraw_projections()
@@ -898,6 +900,13 @@ class ScoutWindow(tk.Tk):
         else:
             lines.append("  Not recorded - re-import this export to store it.")
 
+        where = fielding.table(subject.projected)
+        if where and not subject.is_pitcher:
+            lines += ["", "BY POSITION   (rating, Fld, Def, WAR - best first)"]
+            for position, rating, fld, defense, war in where:
+                lines.append(f"  {position:<3} {rating:>5.0f} {fld:>+7.1f} "
+                             f"{defense:>+7.1f} {war:>6.1f}")
+
         if subject.ratings:
             lines += ["", "RATINGS"]
             lines += _columns([(k, v) for k, v in subject.ratings.items() if v])
@@ -997,9 +1006,16 @@ def _columns(pairs, per_row: int = 6) -> list[str]:
 def _projection_cells(subject, stats) -> tuple:
     """One player's projected stats, blank where the model has none."""
     full = statline.derive(subject.projected, subject.is_pitcher)
+    best = fielding.best_position(subject.projected)
     out = []
     for key, _heading, _width, decimals in stats:
-        value = subject.war if key == "war" else full.get(key)
+        if key == "best_position":
+            out.append(best[0] if best else "")
+            continue
+        if key == "best_war":
+            value = best[1] if best else None
+        else:
+            value = subject.war if key == "war" else full.get(key)
         out.append("" if value is None
                    else statline.format_value(key, value, decimals))
     return tuple(out)
@@ -1018,6 +1034,10 @@ def _projection_key(column: str):
         return lambda s: s.war
     if column == "age":
         return lambda s: int(s.meta.get("age") or 0)
+    if column == "best_position":
+        return lambda s: (fielding.best_position(s.projected) or ("",))[0] or None
+    if column == "best_war":
+        return lambda s: (fielding.best_position(s.projected) or (None, None))[1]
     return lambda s: statline.derive(s.projected, s.is_pitcher).get(column)
 
 

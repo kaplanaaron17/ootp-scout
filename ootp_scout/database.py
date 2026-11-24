@@ -444,6 +444,13 @@ def to_ratings(row: sqlite3.Row) -> dict[str, str]:
     return _json(row, "ratings")
 
 
+def set_projected(connection: sqlite3.Connection, row_id: int,
+                  projected: dict) -> None:
+    """Replace one observation's stored projected line, without committing."""
+    connection.execute("UPDATE observations SET projected = ? WHERE id = ?",
+                       (json.dumps(projected or {}, sort_keys=True), row_id))
+
+
 def to_projected(row: sqlite3.Row) -> dict[str, float]:
     """The projected stat line, or {} for a row recorded before they were kept."""
     return _json(row, "projected")
