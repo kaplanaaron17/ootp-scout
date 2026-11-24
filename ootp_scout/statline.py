@@ -152,6 +152,13 @@ BATTER_DISPLAY = (
     ("position_runs", "PosAdj", 1),
     ("defense_runs", "Def", 1),
     ("war", "WAR", 1),
+    ("ops_vl", "OPS vL", 3),
+    ("ops_vr", "OPS vR", 3),
+    ("wrc_plus_vl", "wRC+ vL", 0),
+    ("wrc_plus_vr", "wRC+ vR", 0),
+    ("war_vl", "WAR vL", 1),
+    ("war_vr", "WAR vR", 1),
+    ("war_split", "WAR splits", 1),
 )
 PITCHER_DISPLAY = (
     ("games", "G", 0),
@@ -175,12 +182,22 @@ PITCHER_DISPLAY = (
     ("era_plus", "ERA+", 0),
     ("war", "WAR", 1),
     ("war_200", "WAR/200", 1),
+    ("era_vl", "ERA vL", 2),
+    ("era_vr", "ERA vR", 2),
+    ("fip_vl", "FIP vL", 2),
+    ("fip_vr", "FIP vR", 2),
+    ("k_rate_vl", "K% vL", 1),
+    ("k_rate_vr", "K% vR", 1),
+    ("war_vl", "WAR vL", 1),
+    ("war_vr", "WAR vR", 1),
+    ("war_split", "WAR splits", 1),
 )
 
 # Rates written without the leading zero, the way box scores do.
-_DROP_LEADING_ZERO = {"avg", "obp", "slg", "ops", "iso", "babip", "woba"}
+_DROP_LEADING_ZERO = {"avg", "obp", "slg", "ops", "iso", "babip", "woba",
+                      "ops_vl", "ops_vr"}
 # Stats shown as a percentage of plate appearances.
-_PERCENTAGES = {"bb_rate", "k_rate"}
+_PERCENTAGES = {"bb_rate", "k_rate", "k_rate_vl", "k_rate_vr"}
 
 
 def fields(line, is_pitcher: bool) -> dict[str, float]:
@@ -191,6 +208,50 @@ def fields(line, is_pitcher: bool) -> dict[str, float]:
         value = getattr(line, name, None)
         if value is not None:
             out[name] = round(float(value), 4)
+    return out
+
+
+def split_fields(line_vl, line_vr, share_vl: float,
+                 is_pitcher: bool) -> dict[str, float]:
+    """The split side of a projected season, worth storing beside it.
+
+    vL and vR are each a full season projected from that side's ratings - a
+    hitter from his contact and power against left- and right-handed
+    pitching, a pitcher from his stuff against left- and right-handed
+    batters. "war_split" blends the two by how much of a season falls on each
+    side, so it is the WAR his splits imply rather than his overall ratings.
+    For a hitter whose overall ratings already average his splits, the two
+    agree; where they do not, the gap is the platoon question.
+    """
+    if line_vl is None or line_vr is None or share_vl is None:
+        return {}
+    out: dict[str, float] = {}
+    for side, line in (("vl", line_vl), ("vr", line_vr)):
+        stored = fields(line, is_pitcher)
+        if is_pitcher:
+            full = derive(stored, True)
+            picks = {"era": full.get("era"), "fip": full.get("fip"),
+                     "k_rate": full.get("k_rate"), "war": full.get("war")}
+        else:
+            picks = {"ops": stored.get("ops"), "wrc_plus": wrc_plus(stored),
+                     "war": stored.get("war")}
+        for key, value in picks.items():
+            if value is not None:
+                out[f"{key}_{side}"] = round(float(value), 4)
+    if "war_vl" in out and "war_vr" in out:
+        out["war_split"] = round(share_vl * out["war_vl"]
+                                 + (1 - share_vl) * out["war_vr"], 4)
+    out["share_vl"] = round(share_vl, 4)
+    return out
+
+
+def stored_line(projected, is_pitcher: bool) -> dict[str, float] | None:
+    """Everything worth storing about one player's projection."""
+    if projected.line is None:
+        return None
+    out = fields(projected.line, is_pitcher)
+    out.update(split_fields(projected.line_vl, projected.line_vr,
+                            projected.share_vl, is_pitcher))
     return out
 
 

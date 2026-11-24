@@ -93,6 +93,9 @@ PROJECTION_IDENTITY = [
     ("age", "Age", 45),
     ("grade", "Grade", 55),
 ]
+# vL and vR are the same season projected from the split ratings, and WAR
+# splits blends the two by how much of a season falls on each side - see
+# projection.SHARE_VS_LHP.
 # Bat, BsR, Fld and PosAdj are WAR's own terms in runs, so a hitter's WAR can
 # be read as where it came from: Def is Fld plus PosAdj, FanGraphs style.
 HITTER_PROJECTION = [
@@ -110,6 +113,9 @@ HITTER_PROJECTION = [
     ("position_runs", "PosAdj", 60, 1),
     ("defense_runs", "Def", 52, 1),
     ("war", "WAR", 55, 1),
+    ("wrc_plus_vl", "wRC+ vL", 68, 0),
+    ("wrc_plus_vr", "wRC+ vR", 68, 0),
+    ("war_split", "WAR splits", 80, 1),
 ]
 PITCHER_PROJECTION = [
     ("games", "G", 42, 0),
@@ -125,6 +131,9 @@ PITCHER_PROJECTION = [
     ("bb_rate", "BB%", 52, 1),
     ("war", "WAR", 55, 1),
     ("war_200", "WAR/200", 70, 1),
+    ("era_vl", "ERA vL", 58, 2),
+    ("era_vr", "ERA vR", 58, 2),
+    ("war_split", "WAR splits", 80, 1),
 ]
 PROJECTION_TABS = {"hitters": ("Hitting projections", HITTER_PROJECTION),
                    "pitchers": ("Pitching projections", PITCHER_PROJECTION)}

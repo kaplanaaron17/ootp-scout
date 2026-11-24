@@ -445,6 +445,20 @@ class WindowTest(unittest.TestCase):
         for wanted in ("ERA", "GS", "IP", "FIP", "WAR"):
             self.assertIn(wanted, headings)
 
+    def test_the_tabs_carry_the_splits(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window._import(PITCHERS)
+        self.settle()
+        for kind, columns in (("hitters", ("wRC+ vL", "wRC+ vR", "WAR splits")),
+                              ("pitchers", ("ERA vL", "ERA vR", "WAR splits"))):
+            headings = self.projection_headings(kind)
+            first = self.projection_rows(kind)[0]
+            for column in columns:
+                self.assertIn(column, headings)
+                self.assertNotEqual(str(first[headings.index(column)]).strip(),
+                                    "")
+
     def test_projections_are_filled_in_and_best_first(self):
         self.window._import(BATTERS)
         self.settle()

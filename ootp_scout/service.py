@@ -136,9 +136,8 @@ def import_export(path: str, *, league: str | None = None, tag: str = "",
             rwar=rwar.get(row.name.strip().lower()),
             scouting_accuracy=row.scouting_accuracy, scale=scale,
             ratings={c: row.values.get(c, "") for c in view.rating_columns},
-            projected=(statline.fields(found.line,
-                                       view.role == views.PITCHER)
-                       if found.line is not None else None)))
+            projected=statline.stored_line(found,
+                                           view.role == views.PITCHER)))
 
     connection = database.connect(db)
     removed = 0

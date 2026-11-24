@@ -1277,8 +1277,9 @@ def _flag_locally(args, report, view, rows, problems) -> int:
             war=found.war, is_pitcher=row.is_pitcher, meta=row.meta,
             rwar=rwar.get(row.name.strip().lower()),
             ratings={c: row.values.get(c, "") for c in view.rating_columns},
-            projected=(statline.fields(found.line, view.role == views.PITCHER)
-                       if found.line is not None else {})))
+            projected=(statline.stored_line(found,
+                                            view.role == views.PITCHER)
+                       or {})))
 
     header = (f"View: {view.ootp_view_name}   "
               f"Grade column: {view.grade_column}   "

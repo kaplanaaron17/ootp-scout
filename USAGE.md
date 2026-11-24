@@ -26,8 +26,8 @@ The window then opens on the projections:
 
 | Tab | Columns |
 | --- | --- |
-| **Hitting projections** | PA, AVG, OBP, SLG, HR, SB, wOBA, wRC+, Bat, BsR, Fld, PosAdj, Def, WAR |
-| **Pitching projections** | G, GS, IP, ERA, FIP, WHIP, K/9, BB/9, HR/9, K%, BB%, WAR, WAR/200 |
+| **Hitting projections** | PA, AVG, OBP, SLG, HR, SB, wOBA, wRC+, Bat, BsR, Fld, PosAdj, Def, WAR, wRC+ vL, wRC+ vR, WAR splits |
+| **Pitching projections** | G, GS, IP, ERA, FIP, WHIP, K/9, BB/9, HR/9, K%, BB%, WAR, WAR/200, ERA vL, ERA vR, WAR splits |
 | **Underrated** | The ranking against the scouting grade, described below |
 
 Every column sorts, best first by WAR to start with; double-click a player for
@@ -42,6 +42,22 @@ comes from the single **DEF** rating the ratings views carry, so it measures
 how good a defender he is, not how well he suits one position over another.
 A player exported without a DEF rating shows Fld and Def blank rather than
 zero, because the model then charges nothing for his glove at all.
+
+**Splits.** The current-ratings views carry split ratings: CON and POW
+against left- and right-handed pitching for hitters, STU against left- and
+right-handed batters for pitchers. Each player is projected twice more, once
+from each side's ratings with everything else unchanged, which gives the vL
+and vR columns. **WAR splits** blends the two by how much of a season falls on
+each side: a hitter faces a lefty in about 27% of his plate appearances, and a
+right-handed pitcher faces about 44% left-handed batters, a left-hander about
+30% (switch hitters turn around). The player card also shows OPS, FIP, K% and
+WAR on each side.
+
+WAR itself stays the calculator's number, projected from the overall ratings,
+so it still matches the site. When OOTP's overall rating is a fair average of
+the splits, WAR and WAR splits agree; where they part, that is a platoon
+player, and WAR splits is the better guide to an everyday role. The potential
+views carry no split ratings, so those columns are blank there.
 
 The **Underrated** tab is the original table: the whole pool, sortable and
 tinted the same way the spreadsheet is. The toolbar also covers tagging,
