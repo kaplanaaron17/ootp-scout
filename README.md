@@ -50,16 +50,19 @@ the site directly.
 double-click it. One file, nothing to install. It is not code-signed, so
 Windows warns on first run — **More info → Run anyway**.
 
-The window imports an export and shows the whole pool in a sortable, tinted
-table, with tagging, player history, trades and spreadsheet export on the
-toolbar.
+The window imports an export at one click - replacing the previous import
+and clearing out the old report files OOTP leaves behind - and opens on
+projections: WAR, wRC+ and the slash line for hitters, with WAR broken into
+batting, baserunning, fielding and positional runs; ERA, GS, IP and FIP for
+pitchers. The Underrated tab has the ranking against the scouting grade, and
+tagging, player history, trades and spreadsheet export are on the toolbar.
 
 **From a checkout**, which also gets you the commands:
 
 ```bash
 git clone https://github.com/kaplanaaron17/ootp-scout
 cd ootp-scout
-python -m ootp_scout gui          # the same window
+python -m ootp_scout              # the same window (or: gui)
 python build_exe.py               # rebuild the exe (needs pyinstaller)
 ```
 
@@ -80,8 +83,8 @@ python -m ootp_scout report --out league.xlsx
 That first line is the whole loop: it finds the newest export the game wrote,
 projects every player, ranks them and records the lot.
 
-`OOTP-Scout.bat` wraps all of it in a menu for people who would rather not use
-a terminal. Full operational detail is in [USAGE.md](USAGE.md).
+`OOTP-Scout.bat` opens the window; `OOTP-Scout-Menu.bat` wraps the commands
+in a menu for people who would rather not use a terminal. Full operational detail is in [USAGE.md](USAGE.md).
 
 ## Design decisions
 

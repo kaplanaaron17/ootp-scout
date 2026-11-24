@@ -84,6 +84,60 @@ MIXED_STATS = [
 ]
 RWAR_COLUMN = ("rwar", "rWAR", 55, 2)
 
+# The Projections tabs: who the player is, then his projected season. No fit,
+# no baseline - just what the model says he will do, best first by WAR.
+PROJECTION_IDENTITY = [
+    ("name", "Player", 165),
+    ("team", "Team", 120),
+    ("position", "Pos", 45),
+    ("age", "Age", 45),
+    ("grade", "Grade", 55),
+]
+# vL and vR are the same season projected from the split ratings, and WAR
+# splits blends the two by how much of a season falls on each side - see
+# projection.SHARE_VS_LHP.
+# Bat, BsR, Fld and PosAdj are WAR's own terms in runs, so a hitter's WAR can
+# be read as where it came from: Def is Fld plus PosAdj, FanGraphs style.
+HITTER_PROJECTION = [
+    ("plate_appearances", "PA", 50, 0),
+    ("avg", "AVG", 52, 3),
+    ("obp", "OBP", 52, 3),
+    ("slg", "SLG", 52, 3),
+    ("home_runs", "HR", 45, 0),
+    ("stolen_bases", "SB", 45, 0),
+    ("woba", "wOBA", 55, 3),
+    ("wrc_plus", "wRC+", 52, 0),
+    ("batting_runs", "Bat", 52, 1),
+    ("baserunning_runs", "BsR", 52, 1),
+    ("fielding_runs", "Fld", 52, 1),
+    ("position_runs", "PosAdj", 60, 1),
+    ("defense_runs", "Def", 52, 1),
+    ("war", "WAR", 55, 1),
+    ("wrc_plus_vl", "wRC+ vL", 68, 0),
+    ("wrc_plus_vr", "wRC+ vR", 68, 0),
+    ("war_split", "WAR splits", 80, 1),
+]
+PITCHER_PROJECTION = [
+    ("games", "G", 42, 0),
+    ("starts", "GS", 42, 0),
+    ("innings", "IP", 55, 1),
+    ("era", "ERA", 50, 2),
+    ("fip", "FIP", 50, 2),
+    ("whip", "WHIP", 52, 2),
+    ("k_9", "K/9", 50, 1),
+    ("bb_9", "BB/9", 50, 1),
+    ("hr_9", "HR/9", 50, 1),
+    ("k_rate", "K%", 52, 1),
+    ("bb_rate", "BB%", 52, 1),
+    ("war", "WAR", 55, 1),
+    ("war_200", "WAR/200", 70, 1),
+    ("era_vl", "ERA vL", 58, 2),
+    ("era_vr", "ERA vR", 58, 2),
+    ("war_split", "WAR splits", 80, 1),
+]
+PROJECTION_TABS = {"hitters": ("Hitting projections", HITTER_PROJECTION),
+                   "pitchers": ("Pitching projections", PITCHER_PROJECTION)}
+
 # Row tints, matching the spreadsheet so the two read alike.
 TAGS = {
     "strong_up": "#c7efce",
@@ -98,7 +152,7 @@ class ScoutWindow(tk.Tk):
         super().__init__()
         self.db = db
         self.title(TITLE)
-        self.geometry("1180x680")
+        self.geometry("1300x720")
         self.minsize(900, 500)
 
         self._results: list = []
@@ -109,10 +163,18 @@ class ScoutWindow(tk.Tk):
         self._pump = None
         self._busy = 0
 
+        self._projected: dict[str, list] = {"hitters": [], "pitchers": []}
+        self._projection_items: dict[str, dict] = {"hitters": {},
+                                                   "pitchers": {}}
+        self._projection_sort: dict[str, tuple] = {
+            "hitters": ("war", True), "pitchers": ("war", True)}
+
         self._build_toolbar()
         self._build_filters()
-        self._build_table()
+        # The status bar is packed before the tabs so that it keeps its place
+        # at the bottom when the window is made small; the tabs take the rest.
         self._build_status()
+        self._build_tabs()
 
         # Closing the window has to stop the pump. Otherwise the next tick
         # fires at widgets that are already gone, and Tcl complains about a
@@ -136,26 +198,23 @@ class ScoutWindow(tk.Tk):
         bar = ttk.Frame(self, padding=(10, 8))
         bar.pack(fill="x")
 
-        ttk.Button(bar, text="Import latest export",
+        ttk.Button(bar, text="Import newest OOTP report",
                    command=self.import_latest).pack(side="left")
         ttk.Button(bar, text="Import a file…",
                    command=self.import_file).pack(side="left", padx=(6, 0))
         ttk.Label(bar, text="Tag").pack(side="left", padx=(16, 4))
-        self.tag_entry = ttk.Entry(bar, width=16)
+        self.tag_entry = ttk.Entry(bar, width=14)
         self.tag_entry.pack(side="left")
 
-        self.replace = tk.BooleanVar(value=False)
-        ttk.Checkbutton(bar, text="Replace older", variable=self.replace).pack(
-            side="left", padx=(12, 0))
+        # On by default: a new list replaces the last one rather than piling
+        # up beside it. Untick to keep a history across imports.
+        self.replace = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text="Overwrite previous import",
+                        variable=self.replace).pack(side="left", padx=(12, 0))
+        self.prune = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text="Delete old OOTP reports",
+                        variable=self.prune).pack(side="left", padx=(8, 0))
 
-        ttk.Button(bar, text="Export to spreadsheet…",
-                   command=self.export_spreadsheet).pack(side="right")
-        ttk.Button(bar, text="Trade…",
-                   command=self.open_trade).pack(side="right", padx=(0, 6))
-        ttk.Button(bar, text="Player history…",
-                   command=self.open_history).pack(side="right", padx=(0, 6))
-        ttk.Button(bar, text="Standings",
-                   command=self.open_standings).pack(side="right", padx=(0, 6))
 
     def _build_filters(self):
         top = ttk.Frame(self, padding=(10, 0, 10, 4))
@@ -188,6 +247,17 @@ class ScoutWindow(tk.Tk):
         self.role.set("all")
         self.role.pack(side="left")
 
+        # The tools sit at the end of the second filter row, which has room for
+        # them; the import row above is full with its two checkboxes.
+        ttk.Button(bottom, text="Export to spreadsheet…",
+                   command=self.export_spreadsheet).pack(side="right")
+        ttk.Button(bottom, text="Trade…",
+                   command=self.open_trade).pack(side="right", padx=(0, 6))
+        ttk.Button(bottom, text="Player history…",
+                   command=self.open_history).pack(side="right", padx=(0, 6))
+        ttk.Button(bottom, text="Standings",
+                   command=self.open_standings).pack(side="right", padx=(0, 6))
+
         label(bottom, "Group")
         self.tag = ttk.Combobox(bottom, width=20, state="readonly")
         self.tag.pack(side="left", padx=(0, 12))
@@ -208,14 +278,60 @@ class ScoutWindow(tk.Tk):
         self.find.pack(side="left", padx=(0, 12))
         # Filtering by name only hides rows, so it needs no refit - redrawing
         # from the findings already in hand is instant.
-        self.find.bind("<KeyRelease>", lambda _e: self._redraw())
+        self.find.bind("<KeyRelease>", lambda _e: self._redraw_all())
 
-        ttk.Button(bottom, text="Show", command=self.refresh_ranking).pack(
+        ttk.Button(bottom, text="Show", command=self.refresh_all).pack(
             side="left")
 
-    def _build_table(self):
-        frame = ttk.Frame(self, padding=(10, 0))
-        frame.pack(fill="both", expand=True)
+    def _build_tabs(self):
+        """Projections first: they are what an import is usually for."""
+        self.tabs = ttk.Notebook(self, padding=(10, 0))
+        self.tabs.pack(fill="both", expand=True)
+        self.projection_trees: dict[str, ttk.Treeview] = {}
+        for kind, (title, _stats) in PROJECTION_TABS.items():
+            frame = ttk.Frame(self.tabs)
+            self.tabs.add(frame, text=title)
+            self.projection_trees[kind] = self._projection_table(frame, kind)
+        frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text="Underrated")
+        self._build_table(frame)
+        self.projection_note = tk.StringVar(value="")
+
+    def _projection_table(self, frame, kind) -> ttk.Treeview:
+        tree = ttk.Treeview(frame, show="headings", selectmode="browse")
+        stats = PROJECTION_TABS[kind][1]
+        keys = [c[0] for c in PROJECTION_IDENTITY] + [s[0] for s in stats]
+        tree.configure(columns=keys)
+        for key, heading, width in PROJECTION_IDENTITY:
+            tree.heading(key, text=heading,
+                         command=lambda k=key, w=kind: self.sort_projections(w, k))
+            tree.column(key, width=width, stretch=False,
+                        anchor="w" if key in ("name", "team") else "center")
+        for key, heading, width, _decimals in stats:
+            tree.heading(key, text=heading,
+                         command=lambda k=key, w=kind: self.sort_projections(w, k))
+            tree.column(key, width=width, stretch=False, anchor="center")
+        tree.bind("<Double-1>", lambda _e, w=kind: self.open_projection_card(w))
+        tree.bind("<Return>", lambda _e, w=kind: self.open_projection_card(w))
+        self._scrolled(frame, tree)
+        return tree
+
+    @staticmethod
+    def _scrolled(frame, tree):
+        vertical = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        horizontal = ttk.Scrollbar(frame, orient="horizontal",
+                                   command=tree.xview)
+        tree.configure(yscrollcommand=vertical.set,
+                       xscrollcommand=horizontal.set)
+        # grid, not pack: the horizontal bar has to sit under the table and
+        # beside nothing, which pack cannot express without a second frame.
+        tree.grid(row=0, column=0, sticky="nsew")
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal.grid(row=1, column=0, sticky="ew")
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+    def _build_table(self, frame):
 
         self.tree = ttk.Treeview(frame, show="headings", selectmode="browse")
         self._stats: list = []
@@ -225,20 +341,7 @@ class ScoutWindow(tk.Tk):
 
         self.tree.bind("<Double-1>", lambda _e: self.open_card())
         self.tree.bind("<Return>", lambda _e: self.open_card())
-
-        vertical = ttk.Scrollbar(frame, orient="vertical",
-                                 command=self.tree.yview)
-        horizontal = ttk.Scrollbar(frame, orient="horizontal",
-                                   command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vertical.set,
-                            xscrollcommand=horizontal.set)
-        # grid, not pack: the horizontal bar has to sit under the table and
-        # beside nothing, which pack cannot express without a second frame.
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vertical.grid(row=0, column=1, sticky="ns")
-        horizontal.grid(row=1, column=0, sticky="ew")
-        frame.rowconfigure(0, weight=1)
-        frame.columnconfigure(0, weight=1)
+        self._scrolled(frame, self.tree)
 
     def _apply_columns(self, stats):
         """Point the table at the analysis columns plus this stat block."""
@@ -275,8 +378,12 @@ class ScoutWindow(tk.Tk):
 
     def _build_status(self):
         self.status = tk.StringVar(value="Import an export to begin.")
+        # What the last import did, on its own line: the fit's summary lands
+        # in the status line a moment later and would otherwise replace it.
+        self.last_import = tk.StringVar(value="")
         bar = ttk.Frame(self, padding=(10, 6))
-        bar.pack(fill="x")
+        bar.pack(side="bottom", fill="x")
+        ttk.Label(bar, textvariable=self.last_import, anchor="w").pack(fill="x")
         ttk.Label(bar, textvariable=self.status, anchor="w").pack(fill="x")
 
     # --- background work ----------------------------------------------------
@@ -341,8 +448,10 @@ class ScoutWindow(tk.Tk):
                 self.league.set(names[0])
             self.refresh_choices()
             if names:
+                self.refresh_projections()
                 self.refresh_ranking()
             else:
+                self._clear_projections()
                 self.status.set("Nothing stored yet - import an export.")
 
         self._run(work, done, "Reading the database…")
@@ -379,32 +488,33 @@ class ScoutWindow(tk.Tk):
             self._import(path)
 
     def _import(self, path):
+        """One click: read it, overwrite what it replaces, show projections.
+
+        No confirmation. Overwriting is what the checkbox beside the button
+        says will happen, and it is on because that is how this is used - a
+        dialog on every import would be a second click asking the same thing.
+        """
         tag = self.tag_entry.get().strip()
         replace = self.replace.get()
-        if replace and not messagebox.askyesno(
-                TITLE,
-                "Replace older will delete this league's earlier imports of "
-                "the same ratings view once the new one is in.\n\n"
-                "Players who have left stop appearing, but their history goes "
-                "too - so a player's grade and WAR over time are lost for "
-                "everyone in that view.\n\n"
-                "The Seen filter hides departed players without deleting "
-                "anything, if that is all you are after.\n\n"
-                "Delete the earlier imports?"):
-            return
+        prune = self.prune.get()
 
         def work():
             return service.import_export(path, tag=tag, replace=replace,
-                                         db=self.db)
+                                         prune_reports=prune, db=self.db)
 
         def done(result):
-            self.status.set(
+            self._said_import(
                 f"{result.view_name}: {result.players} players on the "
                 f"{result.scale} scale - {result.added} new, "
                 f"{result.updated} updated in {result.league!r}"
                 + (f", tagged {result.tag!r}" if result.tag else "")
                 + (f", {result.removed} older removed" if result.removed
+                   else "")
+                + (f", {result.pruned_files} old report file(s) deleted "
+                   f"({_size(result.pruned_bytes)})" if result.pruned_files
                    else ""))
+            # Show what was just imported. The Underrated tab is a click away.
+            self.tabs.select(0 if result.role != "pitcher" else 1)
             if result.skipped:
                 messagebox.showinfo(
                     TITLE,
@@ -414,6 +524,86 @@ class ScoutWindow(tk.Tk):
             self.refresh_sources()
 
         self._run(work, done, f"Reading {os.path.basename(path)}…")
+
+    def _said_import(self, text: str):
+        self.status.set(text)
+        self.last_import.set("Last import: " + text)
+
+    def refresh_all(self):
+        self.refresh_projections()
+        self.refresh_ranking()
+
+    def refresh_projections(self):
+        options = self._filters()
+        wanted = {k: options[k] for k in ("league", "mode", "team", "seen",
+                                          "db")}
+
+        def work():
+            return service.projections(**wanted)
+
+        def done(table):
+            self._projected = {"hitters": table.hitters,
+                               "pitchers": table.pitchers}
+            for kind in self._projected:
+                self._sort_projected(kind)
+            self._redraw_projections()
+            for index, kind in enumerate(PROJECTION_TABS):
+                title = PROJECTION_TABS[kind][0]
+                self.tabs.tab(index,
+                              text=f"{title} ({len(self._projected[kind])})")
+
+        self._run(work, done, "Projecting…",
+                  on_error=lambda _e: self._clear_projections())
+
+    def _clear_projections(self):
+        self._projected = {"hitters": [], "pitchers": []}
+        self._redraw_projections()
+
+    def _redraw_all(self):
+        self._redraw()
+        self._redraw_projections()
+
+    def _redraw_projections(self):
+        wanted = self.find.get().strip().lower()
+        for kind, tree in self.projection_trees.items():
+            tree.delete(*tree.get_children())
+            items = {}
+            stats = PROJECTION_TABS[kind][1]
+            for subject in self._projected[kind]:
+                if wanted and wanted not in subject.name.lower():
+                    continue
+                item = tree.insert("", "end", values=(
+                    subject.name, subject.meta.get("team", ""),
+                    subject.position, subject.meta.get("age", ""),
+                    f"{subject.grade:.0f}") + _projection_cells(subject, stats))
+                items[item] = subject
+            self._projection_items[kind] = items
+
+    def _sort_projected(self, kind):
+        column, reverse = self._projection_sort[kind]
+        key = _projection_key(column)
+        rows = self._projected[kind]
+        has = [s for s in rows if key(s) is not None]
+        lacks = [s for s in rows if key(s) is None]
+        # Blanks last in both directions, as on the Underrated tab.
+        self._projected[kind] = sorted(has, key=key, reverse=reverse) + lacks
+
+    def sort_projections(self, kind: str, column: str):
+        current, reverse = self._projection_sort[kind]
+        if column == current:
+            reverse = not reverse
+        else:
+            reverse = column not in ("name", "team", "position")
+        self._projection_sort[kind] = (column, reverse)
+        self._sort_projected(kind)
+        self._redraw_projections()
+
+    def open_projection_card(self, kind: str):
+        tree = self.projection_trees[kind]
+        chosen = tree.focus() or (tree.selection() or [None])[0]
+        subject = self._projection_items[kind].get(chosen)
+        if subject is not None:
+            messagebox.showinfo(TITLE, self._card(subject))
 
     def refresh_ranking(self):
         options = self._filters()
@@ -669,8 +859,11 @@ class ScoutWindow(tk.Tk):
                         if f.subject.name == name), None)
         if finding is None:
             return
-        subject = finding.subject
+        messagebox.showinfo(TITLE, self._card(finding.subject, finding))
 
+    def _card(self, subject, finding=None) -> str:
+        """A player's projected season as text, with the grade argument when
+        there is a ranking behind it."""
         head = [subject.name]
         where = "  ".join(part for part in (
             subject.meta.get("team", ""), subject.position,
@@ -680,17 +873,23 @@ class ScoutWindow(tk.Tk):
             head.append(where)
 
         grade = [f"{self._grade_label()} {subject.grade:.0f}"]
-        if finding.implied_grade is not None:
+        if finding is not None and finding.implied_grade is not None:
             grade.append(f"implied {finding.implied_grade:.0f}")
-        if finding.grade_gap is not None:
+        if finding is not None and finding.grade_gap is not None:
             grade.append(f"({finding.grade_gap:+.0f})")
         head.append("  ".join(grade))
-        head.append(f"WAR {subject.war:.2f}   expected "
-                    f"{finding.expected_war:.2f}   z {finding.z_score:+.2f}")
+        if finding is not None:
+            head.append(f"WAR {subject.war:.2f}   expected "
+                        f"{finding.expected_war:.2f}   "
+                        f"z {finding.z_score:+.2f}")
+        else:
+            head.append(f"WAR {subject.war:.2f}")
         if subject.rwar is not None:
             head.append(f"rWAR {subject.rwar:.2f}")
-        if finding.scouting_accuracy:
-            head.append(f"Scouting accuracy: {finding.scouting_accuracy}")
+        accuracy = (finding.scouting_accuracy if finding is not None
+                    else subject.meta.get("scouting_accuracy", ""))
+        if accuracy:
+            head.append(f"Scouting accuracy: {accuracy}")
 
         lines = ["", "PROJECTED SEASON"]
         pairs = statline.display(subject.projected, subject.is_pitcher)
@@ -703,7 +902,7 @@ class ScoutWindow(tk.Tk):
             lines += ["", "RATINGS"]
             lines += _columns([(k, v) for k, v in subject.ratings.items() if v])
 
-        messagebox.showinfo(TITLE, "\n".join(head + lines))
+        return "\n".join(head + lines)
 
     def _grade_label(self) -> str:
         return "POT" if self.mode.get() == "potential" else "OVR"
@@ -793,6 +992,42 @@ def _columns(pairs, per_row: int = 6) -> list[str]:
         lines.append("  " + "  ".join(f"{value:>{width}}" for _l, value in chunk))
         lines.append("")
     return lines[:-1] if lines else lines
+
+
+def _projection_cells(subject, stats) -> tuple:
+    """One player's projected stats, blank where the model has none."""
+    full = statline.derive(subject.projected, subject.is_pitcher)
+    out = []
+    for key, _heading, _width, decimals in stats:
+        value = subject.war if key == "war" else full.get(key)
+        out.append("" if value is None
+                   else statline.format_value(key, value, decimals))
+    return tuple(out)
+
+
+def _projection_key(column: str):
+    """How to sort a Projections tab by one of its columns."""
+    text = {"name": lambda s: s.name.lower(),
+            "team": lambda s: (s.meta.get("team") or "").lower(),
+            "position": lambda s: s.position}
+    if column in text:
+        return text[column]
+    if column == "grade":
+        return lambda s: s.grade
+    if column == "war":
+        return lambda s: s.war
+    if column == "age":
+        return lambda s: int(s.meta.get("age") or 0)
+    return lambda s: statline.derive(s.projected, s.is_pitcher).get(column)
+
+
+def _size(count: int) -> str:
+    for unit in ("bytes", "KB", "MB"):
+        if count < 1024 or unit == "MB":
+            return (f"{count} {unit}" if unit == "bytes"
+                    else f"{count:.1f} {unit}")
+        count /= 1024
+    return f"{count:.1f} MB"
 
 
 def _ask(parent, title, prompt) -> str | None:

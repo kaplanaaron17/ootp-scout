@@ -66,7 +66,9 @@ VIEWS: tuple[View, ...] = (
         projection_columns={"contact": "CON", "gap": "GAP", "power": "POW",
                             "eye": "EYE", "avoid_ks": "K's", "speed": "SPE",
                             "stealing": "STE", "defense": "DEF",
-                            "babip_input": "BABIP", "steal_tendency": "SR"},
+                            "babip_input": "BABIP", "steal_tendency": "SR",
+                            "contact_vl": "CON vL", "power_vl": "POW vL",
+                            "contact_vr": "CON vR", "power_vr": "POW vR"},
     ),
     View(
         role=BATTER, mode=POTENTIAL,
@@ -93,7 +95,8 @@ VIEWS: tuple[View, ...] = (
         projection_columns={"stuff": "STU", "movement": "MOV",
                             "control": "CON", "stamina": "STM", "hold": "HLD",
                             "ground_fly": "G/F", "hra_input": "HRA",
-                            "babip_input": "BABIP"},
+                            "babip_input": "BABIP",
+                            "stuff_vl": "STU vL", "stuff_vr": "STU vR"},
     ),
     View(
         role=PITCHER, mode=POTENTIAL,

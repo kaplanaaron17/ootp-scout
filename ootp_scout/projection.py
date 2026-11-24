@@ -219,6 +219,15 @@ class BatterLine:
     ops_plus: float = 0.0
     babip: float = 0.0
     war: float = 0.0
+    # WAR's own pieces, in runs over the projected season. They are not a
+    # second model: they are the four terms the WAR line below already adds
+    # up, kept instead of discarded. Fielding is None when the export carried
+    # no DEF rating, because the model then charges nothing for the glove and
+    # a 0.0 would read as "exactly average defender".
+    batting_runs: float = 0.0
+    baserunning_runs: float = 0.0
+    fielding_runs: float | None = None
+    position_runs: float = 0.0
 
 
 def project_batter(*, contact: float, gap: float, power: float, eye: float,
@@ -305,7 +314,10 @@ def project_batter(*, contact: float, gap: float, power: float, eye: float,
         hit_by_pitches=HBP_PER_550 * scale, strikeouts=so * scale,
         stolen_bases=stolen * scale, caught_stealing=caught * scale,
         avg=avg, obp=obp, slg=slg, ops=obp + slg, ops_plus=ops_plus,
-        babip=babip, war=war * scale)
+        babip=babip, war=war * scale,
+        batting_runs=bat * scale, baserunning_runs=bsr * scale,
+        fielding_runs=zr * scale if has_defense else None,
+        position_runs=POSITION_RUNS.get(position, 0) * scale)
 
 
 @dataclass
@@ -417,6 +429,31 @@ class Projected:
     innings: float | None = None
     runs: float | None = None
     line: BatterLine | PitcherLine | None = None
+    # The same season projected from the split ratings: a hitter against
+    # left- and right-handed pitching, a pitcher against left- and
+    # right-handed batters. None when the export carries no split columns.
+    line_vl: BatterLine | PitcherLine | None = None
+    line_vr: BatterLine | PitcherLine | None = None
+    # The share of his season spent on the vL side, for blending the two.
+    share_vl: float | None = None
+
+
+# How a season divides by handedness. Not in the calculator, which projects
+# from the overall ratings only; these are long-run major-league shares.
+# A hitter faces a left-handed pitcher in roughly 27% of his plate
+# appearances, whichever side he bats from.
+SHARE_VS_LHP = 0.27
+# A pitcher's share of left-handed batters depends on his own hand, because
+# switch hitters turn around: they bat left against a righty and right
+# against a lefty. Roughly 44% of a right-hander's batters stand in left
+# handed, and 30% of a left-hander's.
+SHARE_LHB_VS_RHP = 0.44
+SHARE_LHB_VS_LHP = 0.30
+
+
+def share_of_left_handed_batters(throws: str) -> float:
+    return (SHARE_LHB_VS_LHP if (throws or "").strip().upper().startswith("L")
+            else SHARE_LHB_VS_RHP)
 
 
 def _number(raw: str) -> float | None:
@@ -461,14 +498,28 @@ def project_rows(rows, view, scale: str,
                 if missing:
                     problems.append((row.name, "missing " + ", ".join(missing)))
                     continue
-                line = project_batter(
+                common = dict(
                     defense=rating("defense"), position=row.position,
                     bats=(values.get("B") or "R").strip() or "R",
                     babip_input=rating("babip_input"),
-                    steal_tendency=rating("steal_tendency"),
-                    park=park, **inputs)
-                projected.append(Projected(name=row.name, war=line.war,
-                                           line=line))
+                    steal_tendency=rating("steal_tendency"), park=park)
+                line = project_batter(**common, **inputs)
+                # Splits: OOTP rates contact and power separately against
+                # each hand. Everything else is the same hitter.
+                sides = {}
+                for side in ("vl", "vr"):
+                    contact = rating(f"contact_{side}")
+                    power = rating(f"power_{side}")
+                    if contact is not None and power is not None:
+                        sides[side] = project_batter(
+                            **common, **{**inputs, "contact": contact,
+                                         "power": power})
+                split = len(sides) == 2
+                projected.append(Projected(
+                    name=row.name, war=line.war, line=line,
+                    line_vl=sides.get("vl") if split else None,
+                    line_vr=sides.get("vr") if split else None,
+                    share_vl=SHARE_VS_LHP if split else None))
             else:
                 stuff = rating("stuff", stuff=True)
                 inputs = {name: rating(name) for name in
@@ -488,13 +539,27 @@ def project_rows(rows, view, scale: str,
                                      f"G/F is {ground_fly!r}; expected one of "
                                      + ", ".join(sorted(GROUND_FLY))))
                     continue
-                line = project_pitcher(
-                    stuff=stuff, ground_fly=ground_fly, position=row.position,
+                common = dict(
+                    ground_fly=ground_fly, position=row.position,
                     hra_input=rating("hra_input"),
                     babip_input=rating("babip_input"), park=park, **inputs)
-                projected.append(Projected(name=row.name, war=line.war,
-                                           innings=line.innings,
-                                           runs=line.runs, line=line))
+                line = project_pitcher(stuff=stuff, **common)
+                # Splits: OOTP rates stuff separately against each hand of
+                # batter. Movement and control carry no split in the export.
+                sides = {}
+                for side in ("vl", "vr"):
+                    split_stuff = rating(f"stuff_{side}", stuff=True)
+                    if split_stuff is not None:
+                        sides[side] = project_pitcher(stuff=split_stuff,
+                                                      **common)
+                split = len(sides) == 2
+                projected.append(Projected(
+                    name=row.name, war=line.war, innings=line.innings,
+                    runs=line.runs, line=line,
+                    line_vl=sides.get("vl") if split else None,
+                    line_vr=sides.get("vr") if split else None,
+                    share_vl=(share_of_left_handed_batters(values.get("T"))
+                              if split else None)))
         except (ValueError, KeyError) as error:
             problems.append((row.name, str(error)))
     return projected, problems
