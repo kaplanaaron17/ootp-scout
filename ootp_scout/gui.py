@@ -93,6 +93,17 @@ PROJECTION_IDENTITY = [
     ("age", "Age", 45),
     ("grade", "Grade", 55),
 ]
+# The projection measured against his overall rating, the same comparison the
+# Underrated tab makes: the grade his WAR implies, the gap to the grade he
+# has, the WAR his grade would predict, how far he projects above it, and
+# how unusual that is. Rows are tinted the same way too.
+COMPARISON = [
+    ("implied", "Implied", 60, "{:.0f}"),
+    ("gap", "+/-", 45, "{:+.0f}"),
+    ("expected", "Exp WAR", 65, "{:.1f}"),
+    ("diff", "Diff", 55, "{:+.1f}"),
+    ("z", "z", 50, "{:+.2f}"),
+]
 # vL and vR are the same season projected from the split ratings, and WAR
 # splits blends the two by how much of a season falls on each side - see
 # projection.SHARE_VS_LHP.
@@ -166,6 +177,7 @@ class ScoutWindow(tk.Tk):
         self._busy = 0
 
         self._projected: dict[str, list] = {"hitters": [], "pitchers": []}
+        self._comparison: dict = {}
         self._projection_items: dict[str, dict] = {"hitters": {},
                                                    "pitchers": {}}
         self._projection_sort: dict[str, tuple] = {
@@ -302,13 +314,20 @@ class ScoutWindow(tk.Tk):
     def _projection_table(self, frame, kind) -> ttk.Treeview:
         tree = ttk.Treeview(frame, show="headings", selectmode="browse")
         stats = PROJECTION_TABS[kind][1]
-        keys = [c[0] for c in PROJECTION_IDENTITY] + [s[0] for s in stats]
+        keys = ([c[0] for c in PROJECTION_IDENTITY]
+                + [c[0] for c in COMPARISON] + [s[0] for s in stats])
         tree.configure(columns=keys)
         for key, heading, width in PROJECTION_IDENTITY:
             tree.heading(key, text=heading,
                          command=lambda k=key, w=kind: self.sort_projections(w, k))
             tree.column(key, width=width, stretch=False,
                         anchor="w" if key in ("name", "team") else "center")
+        for key, heading, width, _form in COMPARISON:
+            tree.heading(key, text=heading,
+                         command=lambda k=key, w=kind: self.sort_projections(w, k))
+            tree.column(key, width=width, stretch=False, anchor="center")
+        for name, colour in TAGS.items():
+            tree.tag_configure(name, background=colour)
         for key, heading, width, _decimals in stats:
             tree.heading(key, text=heading,
                          command=lambda k=key, w=kind: self.sort_projections(w, k))
@@ -540,10 +559,22 @@ class ScoutWindow(tk.Tk):
         wanted = {k: options[k] for k in ("league", "mode", "team", "seen",
                                           "db")}
 
-        def work():
-            return service.projections(**wanted)
+        ranked = {k: v for k, v in options.items() if k != "role"}
 
-        def done(table):
+        def work():
+            table = service.projections(**wanted)
+            # Against the overall rating. The fit needs a pool, so a list too
+            # small to fit still shows its projections, just without this.
+            try:
+                findings = service.rank(**ranked).findings
+            except service.ScoutError:
+                findings = []
+            return table, {f.subject.name.strip().lower(): f
+                           for f in findings}
+
+        def done(payload):
+            table, comparison = payload
+            self._comparison = comparison
             self._projected = {"hitters": table.hitters,
                                "pitchers": table.pitchers}
             for kind in self._projected:
@@ -559,6 +590,7 @@ class ScoutWindow(tk.Tk):
 
     def _clear_projections(self):
         self._projected = {"hitters": [], "pitchers": []}
+        self._comparison = {}
         self._redraw_projections()
 
     def _redraw_all(self):
@@ -574,16 +606,25 @@ class ScoutWindow(tk.Tk):
             for subject in self._projected[kind]:
                 if wanted and wanted not in subject.name.lower():
                     continue
-                item = tree.insert("", "end", values=(
+                finding = self._comparison.get(subject.name.strip().lower())
+                tint = self._tint(finding.z_score) if finding else ""
+                item = tree.insert("", "end", tags=((tint,) if tint else ()),
+                                   values=(
                     subject.name, subject.meta.get("team", ""),
                     subject.position, subject.meta.get("age", ""),
-                    f"{subject.grade:.0f}") + _projection_cells(subject, stats))
+                    f"{subject.grade:.0f}") + _comparison_cells(finding)
+                    + _projection_cells(subject, stats))
                 items[item] = subject
             self._projection_items[kind] = items
 
     def _sort_projected(self, kind):
         column, reverse = self._projection_sort[kind]
-        key = _projection_key(column)
+        if any(column == c[0] for c in COMPARISON):
+            def key(subject, column=column):
+                finding = self._comparison.get(subject.name.strip().lower())
+                return _comparison_value(finding, column)
+        else:
+            key = _projection_key(column)
         rows = self._projected[kind]
         has = [s for s in rows if key(s) is not None]
         lacks = [s for s in rows if key(s) is None]
@@ -605,7 +646,8 @@ class ScoutWindow(tk.Tk):
         chosen = tree.focus() or (tree.selection() or [None])[0]
         subject = self._projection_items[kind].get(chosen)
         if subject is not None:
-            messagebox.showinfo(TITLE, self._card(subject))
+            finding = self._comparison.get(subject.name.strip().lower())
+            messagebox.showinfo(TITLE, self._card(subject, finding))
 
     def refresh_ranking(self):
         options = self._filters()
@@ -1001,6 +1043,26 @@ def _columns(pairs, per_row: int = 6) -> list[str]:
         lines.append("  " + "  ".join(f"{value:>{width}}" for _l, value in chunk))
         lines.append("")
     return lines[:-1] if lines else lines
+
+
+def _comparison_value(finding, column: str):
+    if finding is None:
+        return None
+    return {"implied": finding.implied_grade, "gap": finding.grade_gap,
+            "expected": finding.expected_war, "diff": finding.residual,
+            "z": finding.z_score}[column]
+
+
+def _comparison_cells(finding) -> tuple:
+    """His projection against his overall rating, blank when unranked."""
+    out = []
+    for key, _heading, _width, form in COMPARISON:
+        value = _comparison_value(finding, key)
+        text = "" if value is None else form.format(value)
+        if text[:1] == "-" and not text.strip("-+0."):
+            text = "+" + text[1:] if "+" in form else text[1:]
+        out.append(text)
+    return tuple(out)
 
 
 def _projection_cells(subject, stats) -> tuple:

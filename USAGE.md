@@ -30,6 +30,15 @@ The window then opens on the projections:
 | **Pitching projections** | G, GS, IP, ERA, FIP, WHIP, K/9, BB/9, HR/9, K%, BB%, WAR, WAR/200, ERA vL, ERA vR, WAR splits |
 | **Underrated** | The ranking against the scouting grade, described below |
 
+After Grade come the same comparison the Underrated tab makes, so each
+projection is read against the player's overall rating: **Implied** (the
+grade his projected WAR is worth), **+/-** (that minus the grade he has),
+**Exp WAR** (what his grade would predict), **Diff** (his WAR minus that) and
+**z** (how unusual the gap is). Rows are tinted green when he projects well
+above his rating and red when well below, matching the Underrated tab. Sort by
+Diff to see who most outplays his OVR. The comparison needs at least five
+players to fit against, so a smaller list shows the projections alone.
+
 Every column sorts, best first by WAR to start with; double-click a player for
 his full projected season. The projections need no fit, so they work for a
 list of three as well as three hundred.
