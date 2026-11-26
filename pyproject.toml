@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ootp-scout"
-version = "1.0.0"
+version = "1.1.0"
 description = "Find OOTP players whose projected production outruns their scouting grade"
 readme = "README.md"
 license = { text = "MIT" }
