@@ -459,6 +459,56 @@ class WindowTest(unittest.TestCase):
                 self.assertNotEqual(str(first[headings.index(column)]).strip(),
                                     "")
 
+    def test_fielding_at_every_position_reaches_the_tab_and_card(self):
+        from tests.test_fielding import SPREAD, with_positions
+        path = with_positions(self.folder.name, lambda p: SPREAD)
+        self.window._import(path)
+        self.settle()
+        headings = self.projection_headings("hitters")
+        first = self.projection_rows("hitters")[0]
+        self.assertEqual(first[headings.index("Best pos")], "SS")
+        self.assertNotEqual(str(first[headings.index("WAR there")]), "")
+        tree = self.window.projection_trees["hitters"]
+        tree.focus(tree.get_children()[0])
+        self.said.clear()
+        self.window.open_projection_card("hitters")
+        self.assertIn("BY POSITION", self.said[0][1])
+
+    def test_projections_are_measured_against_the_overall_rating(self):
+        """The Underrated comparison, on the projection tabs."""
+        self.window._import(BATTERS)
+        self.settle()
+        headings = self.projection_headings("hitters")
+        for wanted in ("Implied", "+/-", "Exp WAR", "Diff", "z"):
+            self.assertIn(wanted, headings)
+        rows = {r[0]: r for r in self.projection_rows("hitters")}
+        sam = rows["Sleeper Sam"]
+        self.assertGreater(float(sam[headings.index("Diff")]), 0)
+        self.assertGreater(int(sam[headings.index("+/-")]), 0)
+        tree = self.window.projection_trees["hitters"]
+        tints = {tree.item(i)["values"][0]: tree.item(i)["tags"]
+                 for i in tree.get_children()}
+        self.assertIn("strong_up", tints["Sleeper Sam"])
+
+    def test_sorting_the_projections_by_diff(self):
+        self.window._import(BATTERS)
+        self.settle()
+        self.window.sort_projections("hitters", "diff")
+        column = self.projection_headings("hitters").index("Diff")
+        values = [float(r[column]) for r in self.projection_rows("hitters")]
+        self.assertEqual(values, sorted(values, reverse=True))
+        self.assertEqual(self.projection_rows("hitters")[0][0], "Sleeper Sam")
+
+    def test_the_projection_card_carries_the_comparison(self):
+        self.window._import(BATTERS)
+        self.settle()
+        tree = self.window.projection_trees["hitters"]
+        tree.focus(tree.get_children()[0])
+        self.said.clear()
+        self.window.open_projection_card("hitters")
+        self.assertIn("implied", self.said[0][1])
+        self.assertIn("expected", self.said[0][1])
+
     def test_projections_are_filled_in_and_best_first(self):
         self.window._import(BATTERS)
         self.settle()

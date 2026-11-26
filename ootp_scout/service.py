@@ -13,7 +13,7 @@ import datetime as dt
 import os
 from dataclasses import dataclass, field
 
-from . import (database, flagging, pitching, projection, standings,
+from . import (database, fielding, flagging, pitching, projection, standings,
                statline, tables, views)
 
 # Below this many players there is nothing to fit a baseline against.
@@ -99,6 +99,10 @@ def import_export(path: str, *, league: str | None = None, tag: str = "",
         raise ScoutError(f"No such file: {path}")
     try:
         headers, raw = tables.read_table(path)
+        if (not views.candidate_views(headers)
+                and fielding.is_fielding_export(headers)):
+            return import_fielding(path, headers, raw, league=league,
+                                   prune_reports=prune_reports, db=db)
         view = views.identify_view(headers, mode=mode)
         rows, problems = views.parse_rows(headers, raw, view)
     except (OSError, ValueError) as error:
@@ -121,11 +125,39 @@ def import_export(path: str, *, league: str | None = None, tag: str = "",
     resolved_league = (league or report_finder.league_from_path(path)
                        or "default")
 
+    # Position ratings: from this export when it carries them, otherwise
+    # carried over from the last time they were seen. A Fielding Ratings
+    # export is a separate report, and overwriting the batters must not
+    # quietly throw away what it contributed.
+    is_batter = view.role == views.BATTER
+    position_columns = fielding.find_columns(headers) if is_batter else {}
+    earlier: dict[str, tuple[dict, str]] = {}
+    if is_batter:
+        connection = database.connect(db)
+        try:
+            for previous in database.latest(connection, mode=view.mode,
+                                            role=views.BATTER,
+                                            league=resolved_league):
+                held = fielding.stored_ratings(database.to_projected(previous))
+                if held:
+                    earlier[previous["name_key"]] = (held,
+                                                     previous["scale"] or scale)
+        finally:
+            connection.close()
+
     observations = []
     for row in rows:
         found = by_name.get(row.name.strip().lower())
         if found is None or row.grade is None:
             continue
+        stored = statline.stored_line(found, view.role == views.PITCHER)
+        if is_batter and stored:
+            ratings = fielding.read_ratings(row.values, position_columns)
+            rating_scale = scale
+            if not ratings and row.name.strip().lower() in earlier:
+                ratings, rating_scale = earlier[row.name.strip().lower()]
+            stored.update(fielding.position_fields(stored, ratings,
+                                                   rating_scale))
         age = row.age
         observations.append(database.Observation(
             name=row.name, mode=view.mode, role=view.role,
@@ -136,8 +168,7 @@ def import_export(path: str, *, league: str | None = None, tag: str = "",
             rwar=rwar.get(row.name.strip().lower()),
             scouting_accuracy=row.scouting_accuracy, scale=scale,
             ratings={c: row.values.get(c, "") for c in view.rating_columns},
-            projected=statline.stored_line(found,
-                                           view.role == views.PITCHER)))
+            projected=stored))
 
     connection = database.connect(db)
     removed = 0
@@ -165,6 +196,73 @@ def import_export(path: str, *, league: str | None = None, tag: str = "",
                         pruned_bytes=pruned.bytes if pruned else 0,
                         role=view.role,
                         skipped=trouble + [(f"line {n}", d) for n, d in problems])
+
+
+def import_fielding(path: str, headers: list[str], raw: list[list[str]], *,
+                    league: str | None = None, prune_reports: bool = False,
+                    db: str | None = None) -> ImportResult:
+    """Add a Fielding Ratings export's position ratings to stored hitters.
+
+    It carries no hitting ratings, so it projects nothing on its own: each
+    player is matched by name to his latest stored batting line in the
+    league, and his fielding at every position is worked out from that.
+    Import the batting view first.
+    """
+    from . import reports as report_finder
+    resolved_league = (league or report_finder.league_from_path(path)
+                       or "default")
+    columns = fielding.find_columns(headers)
+    cleaned = [h.replace("▾", "").replace("▴", "").strip() for h in headers]
+
+    connection = database.connect(db)
+    matched = 0
+    skipped: list[tuple[str, str]] = []
+    try:
+        stored_rows: dict[str, list] = {}
+        for row in database.latest(connection, role=views.BATTER,
+                                   league=resolved_league):
+            stored_rows.setdefault(row["name_key"], []).append(row)
+        if not stored_rows:
+            raise ScoutError(
+                f"No hitters stored for {resolved_league} yet. Import the "
+                "Batting Ratings view first, then the Fielding Ratings one.")
+        for cells in raw:
+            values = dict(zip(cleaned, cells))
+            name = (values.get("Name") or "").strip()
+            if not name:
+                continue
+            ratings = fielding.read_ratings(values, columns)
+            held = stored_rows.get(name.lower())
+            if not held:
+                if (values.get("POS") or "").strip().upper() not in {
+                        "SP", "RP", "CL", "P"}:
+                    skipped.append((name, "no batting line stored"))
+                continue
+            for row in held:
+                projected = database.to_projected(row)
+                for key in [k for k in projected
+                            if k.split("_", 1)[0] in ("rating", "fld", "def",
+                                                      "war")
+                            and k.split("_", 1)[-1] in fielding.POSITIONS]:
+                    del projected[key]
+                projected.update(fielding.position_fields(
+                    projected, ratings, row["scale"] or "20 to 80"))
+                database.set_projected(connection, row["id"], projected)
+            matched += 1
+        connection.commit()
+    finally:
+        connection.close()
+
+    if not matched:
+        raise ScoutError("None of the players in this fielding report match "
+                         f"a hitter stored for {resolved_league}.")
+    pruned = report_finder.prune_older(path) if prune_reports else None
+    return ImportResult(league=resolved_league, tag="", scale="",
+                        view_name="Fielding Ratings", players=matched,
+                        added=0, updated=matched,
+                        pruned_files=pruned.files if pruned else 0,
+                        pruned_bytes=pruned.bytes if pruned else 0,
+                        role=views.BATTER, skipped=skipped)
 
 
 def _runs_allowed_war(projected) -> dict[str, float]:

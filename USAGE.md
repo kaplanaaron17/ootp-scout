@@ -30,6 +30,15 @@ The window then opens on the projections:
 | **Pitching projections** | G, GS, IP, ERA, FIP, WHIP, K/9, BB/9, HR/9, K%, BB%, WAR, WAR/200, ERA vL, ERA vR, WAR splits |
 | **Underrated** | The ranking against the scouting grade, described below |
 
+After Grade come the same comparison the Underrated tab makes, so each
+projection is read against the player's overall rating: **Implied** (the
+grade his projected WAR is worth), **+/-** (that minus the grade he has),
+**Exp WAR** (what his grade would predict), **Diff** (his WAR minus that) and
+**z** (how unusual the gap is). Rows are tinted green when he projects well
+above his rating and red when well below, matching the Underrated tab. Sort by
+Diff to see who most outplays his OVR. The comparison needs at least five
+players to fit against, so a smaller list shows the projections alone.
+
 Every column sorts, best first by WAR to start with; double-click a player for
 his full projected season. The projections need no fit, so they work for a
 list of three as well as three hundred.
@@ -42,6 +51,24 @@ comes from the single **DEF** rating the ratings views carry, so it measures
 how good a defender he is, not how well he suits one position over another.
 A player exported without a DEF rating shows Fld and Def blank rather than
 zero, because the model then charges nothing for his glove at all.
+
+**Fielding at every position.** OOTP rates every player at every position
+(C, 1B, 2B, 3B, SS, LF, CF, RF) on the same scale as his other ratings. Give
+the tool those ratings and each one goes through the same zone-rating formula
+DEF does, with that position's adjustment, so the card shows Fld, Def and WAR
+at every position he can play, best first. The hitting tab adds **Best pos**
+and **WAR there**. Two ways to get them in:
+
+- **Fielding Ratings report.** Switch the same player list to OOTP's Fielding
+  Ratings view, write the report, and import it after the batting one. It
+  carries no hitting ratings, so it is matched to the hitters already stored
+  by name and only adds the positions. A later batting import keeps them.
+- **A custom batting view** with the eight position columns added. One report
+  then does both.
+
+A position rated blank or 0 means he cannot play there and is left out. Only
+the glove and the positional adjustment change between positions; the bat,
+legs and playing time are the same wherever he stands.
 
 **Splits.** The current-ratings views carry split ratings: CON and POW
 against left- and right-handed pitching for hitters, STU against left- and
