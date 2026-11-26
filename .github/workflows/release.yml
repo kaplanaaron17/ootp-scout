@@ -1,0 +1,61 @@
+# Builds OOTP-Scout.exe on Windows and publishes it as a GitHub release.
+#
+# PyInstaller only builds for the system it runs on, so the Windows exe has to
+# come from a Windows machine. Run it from the Actions tab ("Build and
+# release", Run workflow) with a version such as 1.1.0, or push a tag like
+# v1.1.0. Either way the tests run first and nothing is published if they fail.
+name: Build and release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the v (e.g. 1.1.0)"
+        required: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install pyinstaller openpyxl
+
+      - name: Run the tests
+        run: python -m unittest -v
+
+      - name: Build the exe
+        run: python build_exe.py
+
+      - name: Work out the tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: OOTP Scout ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: dist/OOTP-Scout.exe
+          generate_release_notes: true
+          body: |
+            Download **OOTP-Scout.exe** below and double-click it. Nothing to install.
+            It is not code-signed, so Windows warns on first run: More info, then Run anyway.
